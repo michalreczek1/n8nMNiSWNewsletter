@@ -1,9 +1,9 @@
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 USER root
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 python3-pip python3-venv ca-certificates \
+  && apt-get install -y --no-install-recommends python3 python3-pip python3-venv ca-certificates make g++ \
   && npm install -g n8n@latest \
   && rm -rf /var/lib/apt/lists/*
 
