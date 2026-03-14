@@ -2,7 +2,7 @@
 phase: 4
 title: Deployment architecture and repository bootstrap
 slug: deployment-architecture-and-repository-bootstrap
-status: planned
+status: completed
 owner: Codex
 depends_on:
   - milestone-v1.1-initialization
@@ -15,6 +15,7 @@ verification:
   - Railway runtime assumptions are explicit and testable
   - handoff to phase 5 is clear and low-risk
 planned_at: 2026-03-14
+completed_at: 2026-03-14
 ---
 
 # Plan
