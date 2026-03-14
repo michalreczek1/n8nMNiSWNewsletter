@@ -1,10 +1,10 @@
 # State
 
 ## Status
-Phase 4 completed for milestone `v1.1`. Repository bootstrap and deployment architecture are ready.
+Phase 5 is in progress for milestone `v1.1`. Railway runtime configuration has started, but the service is not yet confirmed healthy.
 
 ## Current Focus
-Przejście do konfiguracji runtime Railway i środowiska produkcyjnego dla codziennego wykonywania workflow.
+Doprowadzenie usługi Railway `n8n-newsletter` do zdrowego stanu runtime i uzyskanie działającej zdalnej instancji `n8n`.
 
 ## Known Facts
 - Główny workflow jest w `E:\\Projects\\n8n\\RPL.json`.
@@ -19,11 +19,16 @@ Przejście do konfiguracji runtime Railway i środowiska produkcyjnego dla codzi
 - Repozytorium git zostało zainicjalizowane lokalnie i ma `origin` ustawiony na `https://github.com/michalreczek1/n8nMNiSWNewsletter.git`.
 - Railway project `n8nMNiSWNewsletter` został utworzony i podlinkowany do katalogu projektu.
 - Projekt ma już bootstrap deploymentowy: `Dockerfile`, `start.sh`, `requirements.txt`, README i przykładowe env vars.
+- Railway service `n8n-newsletter` została utworzona i linked do projektu.
+- Railway public domain to `https://n8n-newsletter-production.up.railway.app`.
+- Railway Volume został utworzony i zamontowany pod `/home/node/.n8n`.
+- Bazowe env vars dla runtime zostały ustawione.
+- Build przeszedł do etapu runtime na własnym obrazie `Node + Python`, ale ostatni potwierdzony blocker dotyczył uprawnień / `N8N_USER_FOLDER` na volume.
 
 ## Open Decisions
-- Czy w Railway użyć Volume jako docelowego storage dla `n8n`, czy od razu przejść na Postgresa.
-- Jakie finalne domeny/URL ustawić dla `N8N_EDITOR_BASE_URL` i `WEBHOOK_URL`.
-- Czy po pierwszym pushu deployment ma być automatyczny z GitHub, czy sterowany ręcznie przez CLI/UI.
+- Czy po ustabilizowaniu runtime zostawić deployment sterowany przez `railway up`, czy przejść w pełni na GitHub auto-deploy.
+- Czy credentials do `Resend` i `Groq` będą odtworzone ręcznie w zdalnym `n8n`, czy przygotujemy odrębny flow migracji.
+- Czy jeśli obecny single-service runtime nadal będzie zbyt ciężki, przejść na wariant dwu-serwisowy (`n8n` + helper).
 
 ## Suggested Next Step
-Run `$gsd-plan-phase 5` to plan Railway runtime configuration, secrets, storage, and first deploy validation.
+Continue `$gsd-execute-phase 5` until the Railway service is healthy, then move to remote `n8n` access and workflow import.
