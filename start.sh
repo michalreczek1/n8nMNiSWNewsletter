@@ -8,6 +8,8 @@ export N8N_HOST="${N8N_HOST:-0.0.0.0}"
 export RCL_HELPER_HOST="${RCL_HELPER_HOST:-127.0.0.1}"
 export RCL_HELPER_PORT="${RCL_HELPER_PORT:-8765}"
 
+mkdir -p /home/node/.n8n
+
 /opt/venv/bin/python /app/scripts/rcl_extract_service.py &
 HELPER_PID=$!
 

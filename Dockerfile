@@ -22,9 +22,7 @@ RUN chmod +x /app/start.sh \
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    N8N_USER_FOLDER=/home/node/.n8n
-
-USER node
+    N8N_USER_FOLDER=/home/node
 
 EXPOSE 5678
 
