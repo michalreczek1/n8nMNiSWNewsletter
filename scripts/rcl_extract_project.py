@@ -1,10 +1,13 @@
 import io
+import http.client
 import json
 import re
+import socket
+import ssl
 import sys
 from html import unescape
 from urllib.parse import urljoin
-from urllib.request import Request, urlopen
+from urllib.request import HTTPHandler, HTTPSHandler, Request, build_opener
 
 from docx import Document
 
@@ -17,9 +20,64 @@ HEADERS = {
 }
 
 
-def fetch_bytes(url: str):
+class IPv4HTTPConnection(http.client.HTTPConnection):
+    def connect(self):
+        addrs = socket.getaddrinfo(self.host, self.port, socket.AF_INET, socket.SOCK_STREAM)
+        last_error = None
+        for family, socktype, proto, _, sockaddr in addrs:
+            sock = socket.socket(family, socktype, proto)
+            sock.settimeout(self.timeout)
+            try:
+                sock.connect(sockaddr)
+                self.sock = sock
+                return
+            except OSError as exc:
+                last_error = exc
+                sock.close()
+        if last_error is not None:
+            raise last_error
+        raise OSError(f"Could not resolve IPv4 address for {self.host}")
+
+
+class IPv4HTTPSConnection(http.client.HTTPSConnection):
+    def connect(self):
+        addrs = socket.getaddrinfo(self.host, self.port, socket.AF_INET, socket.SOCK_STREAM)
+        last_error = None
+        for family, socktype, proto, _, sockaddr in addrs:
+            sock = socket.socket(family, socktype, proto)
+            sock.settimeout(self.timeout)
+            try:
+                sock.connect(sockaddr)
+                if self._tunnel_host:
+                    self.sock = sock
+                    self._tunnel()
+                    sock = self.sock
+                self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+                return
+            except OSError as exc:
+                last_error = exc
+                sock.close()
+        if last_error is not None:
+            raise last_error
+        raise OSError(f"Could not resolve IPv4 address for {self.host}")
+
+
+class IPv4HTTPHandler(HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(IPv4HTTPConnection, req)
+
+
+class IPv4HTTPSHandler(HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(IPv4HTTPSConnection, req)
+
+
+URL_OPENER = build_opener(IPv4HTTPHandler, IPv4HTTPSHandler(context=ssl.create_default_context()))
+
+
+def fetch_bytes(url: str, timeout: int = 60):
     req = Request(url, headers=HEADERS)
-    with urlopen(req, timeout=60) as resp:
+    with URL_OPENER.open(req, timeout=timeout) as resp:
         return resp.read(), resp.headers.get_content_type() or "", resp.geturl()
 
 

@@ -137,7 +137,7 @@
       "parameters": {
         "url": "={{ 'http://127.0.0.1:8765/fetch?url=' + encodeURIComponent($json.homeUrl) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 90000
         }
       },
       "continueOnFail": true
