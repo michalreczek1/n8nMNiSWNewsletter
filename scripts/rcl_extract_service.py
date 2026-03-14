@@ -3,7 +3,7 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from rcl_extract_project import extract_project
+from rcl_extract_project import extract_project, fetch_bytes
 
 
 HOST = os.getenv("RCL_HELPER_HOST", "127.0.0.1")
@@ -15,6 +15,39 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/health":
             self.respond(200, {"ok": True})
+            return
+
+        if parsed.path == "/fetch":
+            params = parse_qs(parsed.query or "")
+            source_url = (params.get("url") or [""])[0].strip()
+            if not source_url:
+                self.respond(400, {"error": True, "message": "Missing url"})
+                return
+
+            try:
+                data, _, final_url = fetch_bytes(source_url)
+            except Exception as exc:  # pragma: no cover - surfaced in response
+                self.respond(
+                    502,
+                    {
+                        "error": True,
+                        "message": f"Failed to fetch url: {exc}",
+                        "url": source_url,
+                    },
+                )
+                return
+
+            html = ""
+            for encoding in ("utf-8", "cp1250", "latin-1"):
+                try:
+                    html = data.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if not html:
+                html = data.decode("utf-8", errors="ignore")
+
+            self.respond(200, {"html": html, "finalUrl": final_url})
             return
 
         if parsed.path != "/extract":

@@ -27,7 +27,7 @@
     },
     {
       "id": "n1",
-      "name": "Schedule Daily 07:10",
+      "name": "Schedule Weekdays 07:00",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -38,9 +38,17 @@
         "rule": {
           "interval": [
             {
-              "field": "days",
+              "field": "weeks",
+              "triggerAtDay": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "weeksInterval": 1,
               "triggerAtHour": 7,
-              "triggerAtMinute": 10
+              "triggerAtMinute": 0
             }
           ]
         }
@@ -127,35 +135,9 @@
         300
       ],
       "parameters": {
-        "url": "={{ $json.homeUrl }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "User-Agent",
-              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-            },
-            {
-              "name": "Accept",
-              "value": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-            },
-            {
-              "name": "Accept-Language",
-              "value": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7"
-            },
-            {
-              "name": "Cache-Control",
-              "value": "no-cache"
-            }
-          ]
-        },
+        "url": "={{ 'http://127.0.0.1:8765/fetch?url=' + encodeURIComponent($json.homeUrl) }}",
         "options": {
-          "response": {
-            "response": {
-              "responseFormat": "string"
-            }
-          },
-          "timeout": 60000
+          "timeout": 30000
         }
       },
       "continueOnFail": true
@@ -414,7 +396,7 @@
         ]
       ]
     },
-    "Schedule Daily 07:10": {
+    "Schedule Weekdays 07:00": {
       "main": [
         [
           {

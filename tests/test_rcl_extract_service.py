@@ -40,3 +40,30 @@ def test_health_endpoint_responds_ok(monkeypatch):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_fetch_endpoint_returns_html(monkeypatch):
+    monkeypatch.setenv("RCL_HELPER_HOST", "127.0.0.1")
+    monkeypatch.setenv("RCL_HELPER_PORT", "8768")
+    service = load_service_module("rcl_extract_service_fetch_test")
+
+    def fake_fetch_bytes(url):
+        assert url == "https://example.test/"
+        return b"<html>ok</html>", "text/html", url
+
+    monkeypatch.setattr(service, "fetch_bytes", fake_fetch_bytes)
+
+    server = ThreadingHTTPServer((service.HOST, service.PORT), service.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    time.sleep(0.2)
+
+    try:
+        body = urlopen(
+            f"http://{service.HOST}:{service.PORT}/fetch?url=https://example.test/",
+            timeout=5,
+        ).read()
+        assert body.decode("utf-8") == '{"html": "<html>ok</html>", "finalUrl": "https://example.test/"}'
+    finally:
+        server.shutdown()
+        server.server_close()
