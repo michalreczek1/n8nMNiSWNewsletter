@@ -1,0 +1,10 @@
+{
+  "projectName": "RCL / MNiSW Newsletter Quality Upgrade",
+  "initializedWith": "gsd-new-project",
+  "mode": "manual",
+  "researchRequired": false,
+  "primaryArtifact": "E:\\Projects\\n8n\\RPL.json",
+  "supportsLocalServices": true,
+  "requiresEndToEndEmailValidation": true,
+  "nextRecommendedCommand": "$gsd-plan-phase 1"
+}

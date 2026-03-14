@@ -1,0 +1,610 @@
+{
+  "name": "RPL homepage → Monitor MNiSW → Resend v6",
+  "nodes": [
+    {
+      "id": "n00",
+      "name": "When clicking Test workflow",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        480
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "n0",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        200,
+        120
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "n1",
+      "name": "Schedule Daily 07:10",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        200,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 7,
+              "triggerAtMinute": 10
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "n2",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        420,
+        300
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "homeUrl",
+              "value": "https://legislacja.gov.pl/",
+              "type": "string"
+            },
+            {
+              "name": "fromEmail",
+              "value": "legislacja@send.familyos.pl",
+              "type": "string"
+            },
+            {
+              "name": "toEmail",
+              "value": "michalreczek@gmail.com",
+              "type": "string"
+            },
+            {
+              "name": "daysLookback",
+              "value": 14,
+              "type": "number"
+            },
+            {
+              "name": "scoreThreshold",
+              "value": 4,
+              "type": "number"
+            },
+            {
+              "name": "batchSize",
+              "value": 3,
+              "type": "number"
+            },
+            {
+              "name": "waitSeconds",
+              "value": 1,
+              "type": "number"
+            },
+            {
+              "name": "retentionDays",
+              "value": 120,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "n3",
+      "name": "Cleanup StaticData",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const cfg = $input.first().json;\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.sentProjects) staticData.sentProjects = {};\nstaticData.currentRunProjects = [];\n\nconst retentionDays = Number(cfg.retentionDays || 120);\nconst cutoff = Date.now() - retentionDays * 86400000;\n\nfor (const [projectId, value] of Object.entries(staticData.sentProjects)) {\n  const seenAt = value && value.seenAt ? Date.parse(value.seenAt) : null;\n  if (!seenAt || seenAt < cutoff) delete staticData.sentProjects[projectId];\n}\n\nreturn [{ json: cfg }];"
+      }
+    },
+    {
+      "id": "n4",
+      "name": "Fetch Homepage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        860,
+        300
+      ],
+      "parameters": {
+        "url": "={{ $json.homeUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "string"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "n5",
+      "name": "Extract Recent Project URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function clean(s) {\n  return String(s || '')\n    .replace(/<[^>]*>/g, ' ')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&quot;/g, '\"')\n    .replace(/&#34;/g, '\"')\n    .replace(/&#39;/g, \"'\")\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction abs(url) {\n  if (!url) return null;\n  if (url.startsWith('http')) return url;\n  if (url.startsWith('/')) return `https://legislacja.gov.pl${url}`;\n  return `https://legislacja.gov.pl/${url}`;\n}\n\nfunction parseDatePL(val) {\n  if (!val) return null;\n  const s = String(val).trim();\n  let m = s.match(/(\\d{2})-(\\d{2})-(\\d{4})/);\n  if (!m) m = s.match(/(\\d{2})\\.(\\d{2})\\.(\\d{4})/);\n  return m ? new Date(`${m[3]}-${m[2]}-${m[1]}T00:00:00Z`) : null;\n}\n\nconst raw = $input.first().json;\nconst html = typeof raw === 'string'\n  ? raw\n  : (raw.body || raw.data || raw.html || raw.response || '');\n\nif (!html) {\n  return [{ json: { error: true, stage: 'fetch-homepage', message: 'Brak HTML z homepage.', bodyPreview: '' } }];\n}\n\nif (html.includes('Żądanie nie może zostać zrealizowane') || html.includes('Request Rejected')) {\n  return [{\n    json: {\n      error: true,\n      stage: 'fetch-homepage',\n      message: 'Serwis odrzucił żądanie do strony głównej.',\n      bodyPreview: html.slice(0, 500)\n    }\n  }];\n}\n\nconst sectionMatch = html.match(/Ostatnio dodane projekty([\\s\\S]*?)Rozwiń lub zwiń menu projektów/i);\nconst section = sectionMatch ? sectionMatch[1] : html;\n\nconst cfg = $('Config').first().json;\nconst daysLookback = Number(cfg.daysLookback || 14);\nconst now = new Date();\nconst out = [];\nconst seen = new Set();\n\nconst regex = /<tr>[\\s\\S]*?<a href=\"([^\"]*\\/projekt\\/[^\"]*)\"[^>]*>([\\s\\S]*?)<\\/a>[\\s\\S]*?<td[^>]*class=\"text-right\"[^>]*>\\s*(\\d{2}-\\d{2}-\\d{4}|\\d{2}\\.\\d{2}\\.\\d{4})\\s*<\\/td>[\\s\\S]*?<\\/tr>/gsi;\nlet m;\nwhile ((m = regex.exec(section)) !== null) {\n  const projectUrl = abs(m[1]);\n  const title = clean(m[2]);\n  const dateCreated = m[3];\n  const created = parseDatePL(dateCreated);\n  const ageDays = created ? Math.floor((now - created) / 86400000) : null;\n  if (ageDays !== null && ageDays > daysLookback) continue;\n  if (!projectUrl || !title || seen.has(projectUrl)) continue;\n  seen.add(projectUrl);\n  out.push({\n    json: {\n      projectUrl,\n      titleFromList: title,\n      dateCreatedFromList: dateCreated,\n      fromEmail: cfg.fromEmail,\n      toEmail: cfg.toEmail,\n      daysLookback: cfg.daysLookback,\n      scoreThreshold: cfg.scoreThreshold,\n      batchSize: cfg.batchSize,\n      waitSeconds: cfg.waitSeconds,\n      retentionDays: cfg.retentionDays\n    }\n  });\n}\n\nif (!out.length) {\n  return [{\n    json: {\n      error: true,\n      stage: 'extract-recent-projects',\n      message: 'Nie znaleziono linków do projektów w sekcji Ostatnio dodane projekty.',\n      bodyPreview: section.slice(0, 700)\n    }\n  }];\n}\n\nreturn out;"
+      }
+    },
+    {
+      "id": "n6",
+      "name": "Filter Error Items",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.error || false }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "n7",
+      "name": "Loop Over Projects",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1520,
+        220
+      ],
+      "parameters": {
+        "batchSize": "={{ $json.batchSize || 3 }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n9",
+      "name": "Wait Between Requests",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1960,
+        220
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": "={{ $json.waitSeconds || 1 }}",
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "n10",
+      "name": "Analyse Project & Filter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2180,
+        220
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ \"http://127.0.0.1:8765/extract?url=\" + encodeURIComponent($json.projectUrl) + \"&fromEmail=\" + encodeURIComponent($json.fromEmail || \"\") + \"&toEmail=\" + encodeURIComponent($json.toEmail || \"\") + \"&daysLookback=\" + encodeURIComponent($json.daysLookback || 14) + \"&scoreThreshold=\" + encodeURIComponent($json.scoreThreshold || 0) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "n10c",
+      "name": "AI Project Summary",
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        2420,
+        40
+      ],
+      "parameters": {
+        "text": "={{ $json.aiContext || $json.analysisText || $json.fallbackSummary || $json.summary || \"\" }}",
+        "schemaType": "manual",
+        "inputSchema": "{\"type\": \"object\", \"properties\": {\"summary\": {\"type\": \"string\", \"description\": \"Krotkie streszczenie po polsku. Ma wyjasniac, co projekt realnie zmienia lub wprowadza, kto jest autorem i jakie sa 2-4 najwazniejsze rozwiazania. Nie moze byc parafraza samego tytulu projektu.\"}, \"author\": {\"type\": \"string\", \"description\": \"Autor lub wnioskodawca projektu. Jezeli jest podany w tekscie, zwroc jego oficjalna nazwe.\"}, \"keyChanges\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"description\": \"Lista 2-4 najwazniejszych zmian, rozwiazan lub skutkow projektu.\"}, \"sourceQuality\": {\"type\": \"string\", \"description\": \"Ocena jakosci materialu zrodlowego: high, medium lub low.\"}}, \"required\": [\"summary\", \"author\", \"keyChanges\", \"sourceQuality\"]}",
+        "options": {
+          "systemPromptTemplate": "Jestes analitykiem procesu legislacyjnego w Polsce. Zwroc wylacznie JSON zgodny ze schematem. Pisz po polsku, konkretnie i rzeczowo. W polu summary napisz 2-4 zdania. Pierwsze zdanie ma wskazywac autora projektu i najwazniejsza konkretna zmiane normatywna, organizacyjna albo finansowa. Nie zaczynaj od pelnego tytulu projektu ani od fraz 'Projekt ustawy', 'Projekt rozporzadzenia' lub 'Projekt uchwaly'. Unikaj pustych sformulowan takich jak 'wprowadza nowe rozwiazania', 'ma na celu poprawe', 'usprawnia system', jesli nie dopowiadasz konkretnie czego dotyczy zmiana. Jezeli zrodlo to OSR albo tabela, wyciagnij konkret: program, fundusz, warunek, limit, beneficjenta, obowiazek albo parametr. keyChanges ma zawierac 2-4 konkretne zmiany albo rozwiazania w krotkich punktach. Jezeli material jest slaby, wykorzystaj najlepsze dostepne informacje, ale nie zmyslaj i ustaw sourceQuality na medium lub low."
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "n10d",
+      "name": "Merge AI Summary",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2640,
+        220
+      ],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      }
+    },
+    {
+      "id": "n10e",
+      "name": "Groq Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        2180,
+        -120
+      ],
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {
+          "temperature": 0.2,
+          "maxTokensToSample": 900
+        }
+      },
+      "credentials": {
+        "groqApi": {
+          "id": "j4jwLe5JW6aKUJ0O",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "id": "n10b",
+      "name": "Finalize Project Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        220
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function parseDatePL(val) {\n  if (!val) return null;\n  const s = String(val).trim();\n  let m = s.match(/(\\d{2})-(\\d{2})-(\\d{4})/);\n  if (!m) m = s.match(/(\\d{2})\\.(\\d{2})\\.(\\d{4})/);\n  return m ? new Date(`${m[3]}-${m[2]}-${m[1]}T00:00:00Z`) : null;\n}\n\nfunction cleanText(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction normalizeKeyChanges(value) {\n  if (!Array.isArray(value)) return [];\n  return value\n    .map(v => cleanText(v).replace(/[.;]+$/g, ''))\n    .filter(Boolean)\n    .slice(0, 4);\n}\n\nfunction normalizeComparable(value) {\n  return cleanText(value)\n    .toLowerCase()\n    .normalize('NFD')\n    .replace(/[\\u0300-\\u036f]/g, '')\n    .replace(/[^a-z0-9\\s]/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction overlapRatio(summary, title) {\n  const summaryTokens = Array.from(new Set(normalizeComparable(summary).split(' ').filter(t => t.length > 3)));\n  const titleTokens = Array.from(new Set(normalizeComparable(title).split(' ').filter(t => t.length > 3)));\n  if (!summaryTokens.length || !titleTokens.length) return 0;\n  const titleSet = new Set(titleTokens);\n  const overlap = summaryTokens.filter(token => titleSet.has(token)).length;\n  return overlap / Math.max(1, Math.min(summaryTokens.length, titleTokens.length));\n}\n\nfunction looksTitleLike(summary, title) {\n  const s = cleanText(summary);\n  const t = cleanText(title);\n  if (!s) return true;\n  const ns = normalizeComparable(s);\n  const nt = normalizeComparable(t);\n  if (nt && ns.startsWith(nt.slice(0, Math.min(nt.length, 140)))) return true;\n  if (/^projekt\\s+(ustawy|rozporzadzenia|rozporządzenia|uchwaly|uchwały)\\b/i.test(s) && overlapRatio(s, t) >= 0.6) return true;\n  return false;\n}\n\nfunction trimSentence(text, maxLen = 520) {\n  let s = cleanText(text);\n  if (!s) return '';\n  if (s.length <= maxLen) return s;\n  s = s.slice(0, maxLen).replace(/\\s+\\S*$/, '');\n  return s.replace(/[,:;\\-–—\\s]+$/, '') + '...';\n}\n\nfunction lowerFirst(text) {\n  const s = cleanText(text);\n  if (!s) return '';\n  return s.charAt(0).toLowerCase() + s.slice(1);\n}\n\nfunction ensureSentence(text) {\n  const s = cleanText(text).replace(/[.;:,\\s]+$/, '');\n  if (!s) return '';\n  return /[.!?]$/.test(s) ? s : `${s}.`;\n}\n\nfunction genericPhraseHits(text) {\n  const summary = normalizeComparable(text);\n  if (!summary) return 0;\n  const phrases = [\n    'wprowadza nowe rozwiazania',\n    'ma na celu poprawe',\n    'ma na celu wprowadzenie zmian',\n    'ma na celu zmiane',\n    'ma wplynac na',\n    'usprawnienie systemu',\n    'najwazniejsze zmiany dotycza',\n    'w tym zakresie',\n    'poprawe jakosci i dostepnosci',\n    'projekt ten ma na celu',\n    'projekt ten wprowadza',\n    'projekt ma rowniez na celu'\n  ];\n  return phrases.filter(p => summary.includes(p)).length;\n}\n\nfunction hasConcreteSignals(text) {\n  const summary = cleanText(text);\n  if (!summary) return false;\n  if (/\\d/.test(summary)) return true;\n  return /(fundusz|program|tabel|stawk|warto(?:ść|sci)|limit|warun(?:ek|ki)|beneficjent|organizacj(?:e|i)|hospitalizac|weekend|paszport|dow[oó]d|o[łl]ow|termomoderniz|stop smog|po[żz]ytku publicznego|świadcze|personel|dokument publiczn|nara[żz]eni|krwi|komisji|wynagrodze[nń])/i.test(summary);\n}\n\nfunction looksTooGeneric(summary, keyChanges) {\n  const text = cleanText(summary);\n  if (!text) return true;\n  const hits = genericPhraseHits(text);\n  const concrete = hasConcreteSignals(text);\n  const hasChanges = normalizeKeyChanges(keyChanges).length > 0;\n  if (hits >= 2 && !concrete) return true;\n  if (hits >= 1 && !concrete && hasChanges) return true;\n  if (/^projekt dotyczy:/i.test(text)) return true;\n  return false;\n}\n\nfunction composeSummary(author, keyChanges, fallbackSummary) {\n  const changes = normalizeKeyChanges(keyChanges);\n  const cleanAuthor = cleanText(author);\n  const safeFallback = cleanText(fallbackSummary);\n  if (changes.length) {\n    const first = lowerFirst(changes[0]);\n    const rest = changes.slice(1, 3).map(lowerFirst);\n    const intro = cleanAuthor\n      ? ensureSentence(`${cleanAuthor} przygotował projekt, który przewiduje ${first}`)\n      : ensureSentence(`Projekt przewiduje ${first}`);\n    let second = '';\n    if (rest.length === 1) {\n      second = ensureSentence(`Dodatkowo projekt obejmuje ${rest[0]}`);\n    } else if (rest.length > 1) {\n      second = ensureSentence(`Dodatkowo projekt obejmuje ${rest.join(' oraz ')}`);\n    }\n    if (safeFallback && !looksTitleLike(safeFallback, '') && !looksTooGeneric(safeFallback, [])) {\n      const fallbackSentence = ensureSentence(safeFallback);\n      return trimSentence([intro, second, fallbackSentence].filter(Boolean).join(' '));\n    }\n    return trimSentence([intro, second].filter(Boolean).join(' '));\n  }\n  if (cleanAuthor && safeFallback) {\n    return trimSentence(`Autorem projektu jest ${cleanAuthor}. ${safeFallback}`);\n  }\n  return trimSentence(safeFallback);\n}\n\nfunction ensureAuthor(summary, author) {\n  const cleanAuthor = cleanText(author);\n  if (!summary || !cleanAuthor) return summary;\n  const normalizedSummary = normalizeComparable(summary);\n  const normalizedAuthor = normalizeComparable(cleanAuthor);\n  if (normalizedSummary.includes(normalizedAuthor)) return summary;\n  return trimSentence(`Autorem projektu jest ${cleanAuthor}. ${summary}`);\n}\n\nconst payload = $json;\nif (!payload || payload.error || !payload.url) return { json: {} };\n\nconst ai = payload.output && typeof payload.output === 'object' ? payload.output : null;\nconst rawAiSummary = cleanText(ai?.summary || '');\nconst aiAuthor = cleanText(ai?.author || '');\nconst aiKeyChanges = normalizeKeyChanges(ai?.keyChanges);\nconst aiSourceQuality = cleanText(ai?.sourceQuality || '');\n\nconst fallbackSummary = trimSentence(payload.fallbackSummary || payload.summary || `Projekt dotyczy: ${payload.title || payload.url}.`);\nconst applicant = cleanText(payload.applicant || aiAuthor);\nlet aiSummary = rawAiSummary && !looksTitleLike(rawAiSummary, payload.title) ? trimSentence(rawAiSummary) : '';\nif (aiSummary && looksTooGeneric(aiSummary, aiKeyChanges)) {\n  aiSummary = '';\n}\nlet summary = aiSummary || composeSummary(applicant || aiAuthor, aiKeyChanges, fallbackSummary);\nsummary = ensureAuthor(summary || fallbackSummary, applicant || aiAuthor);\nsummary = trimSentence(summary || fallbackSummary);\n\nconst textForAnalysis = `${payload.title || ''} ${applicant || ''} ${payload.stage || ''} ${payload.projectType || ''} ${summary} ${(aiKeyChanges || []).join(' ')} ${fallbackSummary}`.toLowerCase();\n\nconst strong = [\n  'nauka','nauki','działalności naukowej','badania naukowe',\n  'szkolnictwa wyższego','uczelnia','uczelnie','uczelniach',\n  'student','studenci','doktorant','doktoranci',\n  'nauczyciel akademicki','pracownik naukowy',\n  'instytut badawczy','polska akademia nauk','pan',\n  'ncn','narodowe centrum nauki','ncbir','narodowe centrum badań i rozwoju',\n  'nawa','polska komisja akredytacyjna',\n  'stopień doktora','tytuł profesora','stopni naukowych',\n  'ewaluacja jakości działalności naukowej',\n  'system informacji o szkolnictwie wyższym','pol-on','polon',\n  'prawo o szkolnictwie wyższym i nauce'\n];\nconst medium = [\n  'kształcenie','studia','szkoła wyższa','szkoły wyższe',\n  'pomoc materialna','stypendium','akademik','rektor','senat uczelni',\n  'instytut','badawcz','laboratorium','grant','granty',\n  'transfer technologii','innowacje','spin-off','startup akademicki'\n];\nconst negative = [\n  'szkoła podstawowa','przedszkole','żłobek','liceum','technikum',\n  'matura','egzamin ósmoklasisty','szkoła branżowa'\n];\n\nlet score = 0;\nconst hitsStrong = [], hitsMedium = [], hitsNegative = [];\nfor (const kw of strong) { if (textForAnalysis.includes(kw)) { score += 3; hitsStrong.push(kw); } }\nfor (const kw of medium) { if (textForAnalysis.includes(kw)) { score += 1; hitsMedium.push(kw); } }\nfor (const kw of negative) { if (textForAnalysis.includes(kw)) { score -= 2; hitsNegative.push(kw); } }\n\nif (applicant.toLowerCase().includes('minister nauki')) score += 6;\nif (applicant.toLowerCase().includes('minister edukacji')) score -= 1;\nif (/polska akademia nauk|ncn|ncbir|nawa/i.test(textForAnalysis)) score += 4;\n\nconst created = parseDatePL(payload.dateCreated);\nconst now = new Date();\nconst ageDays = created ? Math.floor((now - created) / 86400000) : null;\nconst daysLookback = Number(payload.daysLookback || 14);\nconst withinLookback = ageDays === null ? true : ageDays <= daysLookback;\n\nconst threshold = Number(payload.scoreThreshold || 4);\nconst isRelevant = score >= threshold;\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.sentProjects) staticData.sentProjects = {};\nif (!Array.isArray(staticData.currentRunProjects)) staticData.currentRunProjects = [];\n\nconst projectId = payload.projectId || payload.url;\nconst fingerprint = [payload.title || '', payload.dateUpdated || '', payload.stage || '', payload.documentUrl || '', summary].join('|');\nconst alreadySent = staticData.sentProjects[projectId] && staticData.sentProjects[projectId].fingerprint === fingerprint;\nconst includeInMain = withinLookback && isRelevant && !alreadySent;\n\nconst why = [];\nif (applicant.toLowerCase().includes('minister nauki')) why.push('wnioskodawcą jest Minister Nauki lub Minister Nauki i Szkolnictwa Wyższego');\nif (hitsStrong.some(h => ['nauka','nauki','badania naukowe','działalności naukowej'].includes(h))) why.push('projekt zawiera bezpośrednie odniesienia do nauki lub badań naukowych');\nif (hitsStrong.some(h => ['szkolnictwa wyższego','uczelnia','uczelnie','student','doktorant','nauczyciel akademicki'].includes(h))) why.push('projekt wpływa na szkolnictwo wyższe, uczelnie, studentów lub doktorantów');\nif (textForAnalysis.includes('prawo o szkolnictwie wyższym i nauce')) why.push('projekt odwołuje się do ustawy Prawo o szkolnictwie wyższym i nauce');\nif (/polska akademia nauk|ncn|ncbir|nawa/i.test(textForAnalysis)) why.push('projekt dotyczy instytucji systemu nauki i szkolnictwa wyższego');\nif (!why.length) why.push('projekt nie spełnił szczególnych kryteriów MNiSW, ale został ujęty w przeglądzie RCL');\n\nif (includeInMain) {\n  staticData.sentProjects[projectId] = {\n    fingerprint,\n    seenAt: new Date().toISOString()\n  };\n}\n\nconst result = {\n  projectId,\n  title: payload.title,\n  applicant,\n  stage: payload.stage,\n  number: payload.number,\n  projectType: payload.projectType,\n  dateCreated: payload.dateCreated,\n  dateUpdated: payload.dateUpdated,\n  summary,\n  fallbackSummary,\n  aiSummary,\n  aiAuthor,\n  keyChanges: aiKeyChanges,\n  sourceQuality: aiSourceQuality || payload.summarySource || '',\n  whyRelevant: why.join('; '),\n  score,\n  url: payload.url,\n  fromEmail: payload.fromEmail,\n  toEmail: payload.toEmail,\n  isRelevant,\n  withinLookback,\n  alreadySent: Boolean(alreadySent),\n  includeInMain,\n  summarySource: aiSummary ? 'ai-summary' : payload.summarySource,\n  documentUrl: payload.documentUrl,\n  documentLabel: payload.documentLabel\n};\n\nstaticData.currentRunProjects.push(result);\nreturn { json: result };"
+      }
+    },
+    {
+      "id": "n11",
+      "name": "Next Batch",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2180,
+        100
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "n12",
+      "name": "Build Email If Any",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3100,
+        220
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function cleanText(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction escapeHtml(value) {\n  return String(value || '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\nfunction normalizeKeyChanges(value) {\n  if (!Array.isArray(value)) return [];\n  return value.map(v => cleanText(v)).filter(Boolean).slice(0, 4);\n}\n\nfunction renderMetaHtml(parts) {\n  const filtered = parts.filter(Boolean);\n  if (!filtered.length) return '';\n  return filtered\n    .map(v => `<span style=\"display:inline-block;font-size:12px;line-height:1.5;color:#64748b;margin-right:0\">${escapeHtml(v)}</span>`)\n    .join('<span style=\"display:inline-block;font-size:12px;line-height:1.5;color:#cbd5e1;padding:0 8px\">|</span>');\n}\n\nfunction renderMetaText(parts) {\n  const filtered = parts.filter(Boolean).map(v => cleanText(v)).filter(Boolean);\n  return filtered.length ? filtered.join(' | ') : null;\n}\n\nfunction renderKeyChangesHtml(changes, tone = 'blue') {\n  const items = normalizeKeyChanges(changes);\n  if (!items.length) return '';\n  const accent = tone === 'amber' ? '#b45309' : '#1d4ed8';\n  const background = tone === 'amber' ? '#fff7ed' : '#eff6ff';\n  const border = tone === 'amber' ? '#f59e0b' : '#93c5fd';\n  return `\n<div style=\"margin-top:14px;background:${background};border-radius:10px;padding:12px 14px;border:1px solid ${border}\">\n  <div style=\"font-size:11px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px\">Kluczowe zmiany</div>\n  <ul style=\"margin:0;padding-left:18px;color:#334155;font-size:13px;line-height:1.7\">\n    ${items.map(item => `<li style=\"margin-bottom:4px\">${escapeHtml(item)}</li>`).join('')}\n  </ul>\n</div>`;\n}\n\nfunction renderKeyChangesText(changes) {\n  const items = normalizeKeyChanges(changes);\n  if (!items.length) return null;\n  return `Kluczowe zmiany: ${items.join('; ')}`;\n}\n\nfunction renderFooterHtml(dateStr) {\n  return `<div style=\"margin-top:24px;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:18px 20px;text-align:center\">\n    <div style=\"font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#1e3a5f;margin-bottom:6px\">Monitor Legislacyjny · MNiSW</div>\n    <div style=\"font-size:13px;color:#475569;line-height:1.6\">Made by Michał Reczek · <a href=\"mailto:michalreczek@gmail.com\" style=\"color:#1d4ed8;text-decoration:none\">michalreczek@gmail.com</a></div>\n    <div style=\"font-size:11px;color:#94a3b8;margin-top:8px\">Źródło: strona główna legislacja.gov.pl · ${escapeHtml(dateStr)}</div>\n  </div>`;\n}\n\nfunction renderFooterText(dateStr) {\n  return [\n    'Monitor Legislacyjny - MNiSW',\n    'Made by Michał Reczek',\n    'Kontakt: michalreczek@gmail.com',\n    `Źródło: strona główna legislacja.gov.pl | ${dateStr}`\n  ].join('\\n');\n}\n\nconst staticData = $getWorkflowStaticData('global');\nconst analysed = (Array.isArray(staticData.currentRunProjects) ? staticData.currentRunProjects : [])\n  .filter(i =>\n    i &&\n    typeof i.title === 'string' && i.title.trim() &&\n    typeof i.summary === 'string' && i.summary.trim() &&\n    typeof i.url === 'string' && i.url.trim()\n  );\n\nconst extracted = $('Extract Recent Project URLs').all()\n  .map(i => i.json)\n  .filter(i =>\n    i &&\n    !i.error &&\n    typeof i.projectUrl === 'string' && i.projectUrl.trim() &&\n    typeof i.titleFromList === 'string' && i.titleFromList.trim()\n  );\n\nconst metaSource = analysed.find(i => typeof i.fromEmail === 'string' && i.fromEmail.trim() && typeof i.toEmail === 'string' && i.toEmail.trim())\n  || extracted.find(i => typeof i.fromEmail === 'string' && i.fromEmail.trim() && typeof i.toEmail === 'string' && i.toEmail.trim());\n\nif (!metaSource) {\n  return [];\n}\n\nconst analysedByUrl = new Map(analysed.map(i => [i.url, i]));\nconst appendixProjects = [];\nconst seen = new Set();\n\nfor (const item of extracted) {\n  const analysedItem = analysedByUrl.get(item.projectUrl);\n  appendixProjects.push({\n    title: analysedItem?.title || item.titleFromList,\n    summary: analysedItem?.summary || 'Projekt widoczny w RCL, ale nie udało się pobrać treści uzasadnienia z aktywnego etapu.',\n    url: item.projectUrl,\n    dateCreated: analysedItem?.dateCreated || item.dateCreatedFromList || '',\n    applicant: analysedItem?.applicant || '',\n    number: analysedItem?.number || '',\n    projectType: analysedItem?.projectType || '',\n    stage: analysedItem?.stage || '',\n    whyRelevant: analysedItem?.whyRelevant || 'Pozycja ujęta w zbiorczym przeglądzie projektów widocznych w RCL.',\n    score: analysedItem?.score || 0,\n    includeInMain: Boolean(analysedItem?.includeInMain),\n    keyChanges: normalizeKeyChanges(analysedItem?.keyChanges || [])\n  });\n  seen.add(item.projectUrl);\n}\n\nfor (const item of analysed) {\n  if (seen.has(item.url)) continue;\n  appendixProjects.push({\n    title: item.title,\n    summary: item.summary,\n    url: item.url,\n    dateCreated: item.dateCreated || '',\n    applicant: item.applicant || '',\n    number: item.number || '',\n    projectType: item.projectType || '',\n    stage: item.stage || '',\n    whyRelevant: item.whyRelevant || 'Pozycja ujęta w zbiorczym przeglądzie projektów widocznych w RCL.',\n    score: item.score || 0,\n    includeInMain: Boolean(item.includeInMain),\n    keyChanges: normalizeKeyChanges(item.keyChanges || [])\n  });\n}\n\nif (!appendixProjects.length) {\n  return [];\n}\n\nconst mainItems = appendixProjects\n  .filter(i => i.includeInMain)\n  .sort((a, b) => (b.score || 0) - (a.score || 0));\n\nconst allProjects = appendixProjects;\nconst today = new Date();\nconst dateStr = today.toISOString().slice(0, 10);\n\nconst statsCards = `\n<div style=\"margin-top:22px;display:flex;gap:18px;flex-wrap:wrap\">\n  <div style=\"min-width:150px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18);box-shadow:inset 0 1px 0 rgba(255,255,255,.08);border-radius:12px;padding:14px 22px;text-align:center\">\n    <div style=\"font-size:30px;font-weight:800;line-height:1\">${mainItems.length}</div>\n    <div style=\"font-size:11px;opacity:.82;margin-top:8px;text-transform:uppercase;letter-spacing:.8px\">W sekcji głównej</div>\n  </div>\n  <div style=\"min-width:150px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18);box-shadow:inset 0 1px 0 rgba(255,255,255,.08);border-radius:12px;padding:14px 22px;text-align:center\">\n    <div style=\"font-size:30px;font-weight:800;line-height:1\">${allProjects.length}</div>\n    <div style=\"font-size:11px;opacity:.82;margin-top:8px;text-transform:uppercase;letter-spacing:.8px\">Łącznie w RCL</div>\n  </div>\n</div>`;\n\nconst mainCards = mainItems.length\n  ? mainItems.map((p, idx) => `\n<div style=\"background:#fff;border:1px solid #dbe4f0;border-radius:14px;padding:22px 22px 20px;margin-bottom:18px;box-shadow:0 8px 24px rgba(15,23,42,.04)\">\n  <div style=\"display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px\">\n    <span style=\"background:#dbeafe;color:#1d4ed8;border-radius:999px;padding:4px 11px;font-size:12px;font-weight:700\">#${idx + 1}</span>\n    ${p.number ? `<span style=\"background:#f8fafc;color:#475569;border:1px solid #e2e8f0;border-radius:999px;padding:4px 11px;font-size:12px\">${escapeHtml(p.number)}</span>` : ''}\n    ${p.projectType ? `<span style=\"background:#f8fafc;color:#475569;border:1px solid #e2e8f0;border-radius:999px;padding:4px 11px;font-size:12px\">${escapeHtml(p.projectType)}</span>` : ''}\n  </div>\n  ${renderMetaHtml([p.dateCreated, p.applicant, p.stage]) ? `<div style=\"margin-bottom:10px;line-height:1.8\">${renderMetaHtml([p.dateCreated, p.applicant, p.stage])}</div>` : ''}\n  <h3 style=\"margin:0 0 10px;font-size:18px;color:#0f172a;line-height:1.5\">${escapeHtml(p.title)}</h3>\n  <div style=\"margin-top:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 15px\">\n    <div style=\"font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px\">Streszczenie</div>\n    <p style=\"margin:0;font-size:14px;color:#334155;line-height:1.7\">${escapeHtml(p.summary)}</p>\n  </div>\n  ${renderKeyChangesHtml(p.keyChanges)}\n  <div style=\"margin-top:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px\">\n    <div style=\"font-size:11px;font-weight:700;color:#b45309;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px\">Dlaczego dotyczy MNiSW</div>\n    <p style=\"margin:0;font-size:13px;color:#374151;line-height:1.6\">${escapeHtml(p.whyRelevant)}</p>\n  </div>\n  <div style=\"margin-top:16px\">\n    <a href=\"${escapeHtml(p.url)}\" style=\"display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:600\">Otwórz projekt</a>\n  </div>\n</div>`).join('')\n  : `\n<div style=\"background:#fff;border:1px solid #dbe4f0;border-radius:14px;padding:22px 22px 20px;margin-bottom:18px;box-shadow:0 8px 24px rgba(15,23,42,.04)\">\n  <h3 style=\"margin:0 0 10px;font-size:18px;color:#0f172a;line-height:1.45\">Brak nowych projektów mieszczących się we właściwości Ministra Nauki i Szkolnictwa Wyższego</h3>\n  <p style=\"margin:0;font-size:14px;color:#475569;line-height:1.7\">Na stronie głównej RCL pojawiły się nowe projekty, ale żaden z nich nie mieści się w przyjętym zakresie właściwości Ministra Nauki i Szkolnictwa Wyższego albo nie wpływa na ten obszar w stopniu uzasadniającym pokazanie go w sekcji głównej. Niżej znajdziesz najnowsze projekty z RCL wraz z krótkim opisem.</p>\n</div>`;\n\nconst appendixCards = allProjects.map((p, idx) => `\n<div style=\"background:#ffffff;border:1px solid #d9dee8;border-radius:12px;padding:16px 16px 15px;margin-bottom:14px;\">\n  <div style=\"display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;\">\n    <span style=\"background:#eef2ff;color:#334155;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700\">RCL ${idx + 1}</span>\n    ${renderMetaHtml([p.dateCreated, p.applicant])}\n  </div>\n  <div style=\"font-size:15px;font-weight:700;color:#0f172a;line-height:1.5;margin-bottom:8px;\">${escapeHtml(p.title)}</div>\n  <div style=\"font-size:13px;color:#374151;line-height:1.7;margin-bottom:10px;\">${escapeHtml(p.summary)}</div>\n  ${renderKeyChangesHtml(p.keyChanges, 'amber')}\n  <a href=\"${escapeHtml(p.url)}\" style=\"display:inline-block;margin-top:12px;font-size:12px;color:#1d4ed8;text-decoration:none;font-weight:600;\">Otwórz projekt</a>\n</div>`).join('');\n\nconst html = `<!DOCTYPE html><html lang=\"pl\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>*{box-sizing:border-box}body{margin:0;padding:20px;background:#f1f5f9;font-family:Arial,sans-serif}</style></head><body><div style=\"max-width:700px;margin:0 auto\"><div style=\"background:linear-gradient(135deg,#163760,#2563eb);color:#fff;border-radius:16px;padding:30px 28px 26px;margin-bottom:20px;box-shadow:0 18px 36px rgba(37,99,235,.20)\"><div style=\"font-size:11px;opacity:.72;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:8px\">Monitor Legislacyjny · MNiSW</div><h1 style=\"margin:0 0 10px;font-size:24px;font-weight:800;line-height:1.25\">Przegląd projektów z RCL</h1><div style=\"max-width:540px;opacity:.92;font-size:14px;line-height:1.7\">Sekcja główna pokazuje projekty, które zgodnie z przyjętymi założeniami mieszczą się we właściwości Ministra Nauki i Szkolnictwa Wyższego albo wyraźnie wpływają na ten obszar. Na końcu znajdziesz sekcję <strong style=\"color:#fff\">Najnowsze projekty w RCL</strong>, żeby szybko przejrzeć cały dzisiejszy zestaw.</div>${statsCards}</div><div style=\"margin-bottom:22px\">${mainCards}</div><div style=\"background:#eef4fb;border:1px solid #d8e2ef;border-radius:14px;padding:18px 18px 6px;margin-bottom:18px\"><div style=\"font-size:12px;font-weight:700;color:#52606d;text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px\">Najnowsze projekty w RCL</div>${appendixCards}</div>${renderFooterHtml(dateStr)}</div></body></html>`;\n\nconst newline = '\\n';\nconst separator = '\\n\\n---\\n\\n';\n\nconst mainText = mainItems.length\n  ? mainItems.map((p, idx) => [\n      `${idx + 1}. ${p.title}`,\n      `Link: ${p.url}`,\n      renderMetaText([p.dateCreated, p.applicant, p.stage]),\n      p.number ? `Numer: ${p.number}` : null,\n      p.projectType ? `Rodzaj: ${p.projectType}` : null,\n      `Dlaczego MNiSW: ${p.whyRelevant}`,\n      `Streszczenie: ${p.summary}`,\n      renderKeyChangesText(p.keyChanges)\n    ].filter(Boolean).join(newline)).join(separator)\n  : 'Brak nowych projektów mieszczących się we właściwości Ministra Nauki i Szkolnictwa Wyższego albo wyraźnie wpływających na ten obszar.';\n\nconst appendixText = allProjects.map((p, idx) => [\n  `${idx + 1}. ${p.title}`,\n  `Link: ${p.url}`,\n  renderMetaText([p.dateCreated, p.applicant]),\n  `Krótki opis: ${p.summary}`,\n  renderKeyChangesText(p.keyChanges)\n].filter(Boolean).join(newline)).join(separator);\n\nconst subject = mainItems.length\n  ? `Monitor MNiSW | ${mainItems.length} nowych projektów – ${dateStr}`\n  : `Monitor MNiSW | Przegląd RCL – ${dateStr}`;\n\nstaticData.currentRunProjects = [];\n\nreturn [{\n  json: {\n    subject,\n    html,\n    text: `Monitor Legislacyjny - MNiSW\\nData: ${dateStr}\\nSekcja główna: ${mainItems.length}\\nŁącznie w RCL: ${allProjects.length}\\n\\nSekcja główna\\n${mainText}\\n\\nNajnowsze projekty w RCL\\n${appendixText}\\n\\n${renderFooterText(dateStr)}`,\n    fromEmail: metaSource.fromEmail,\n    toEmail: metaSource.toEmail\n  }\n}];"
+      }
+    },
+    {
+      "id": "n13",
+      "name": "Send via Resend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3320,
+        220
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({ from: $json.fromEmail, to: [$json.toEmail], subject: $json.subject, html: $json.html, text: $json.text }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "S9uJnWFgn0oftGIv",
+          "name": "Header Auth account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When clicking Test workflow": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Daily 07:10": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Cleanup StaticData",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleanup StaticData": {
+      "main": [
+        [
+          {
+            "node": "Fetch Homepage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Homepage": {
+      "main": [
+        [
+          {
+            "node": "Extract Recent Project URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Recent Project URLs": {
+      "main": [
+        [
+          {
+            "node": "Filter Error Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Error Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Loop Over Projects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Projects": {
+      "main": [
+        [
+          {
+            "node": "Build Email If Any",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait Between Requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Between Requests": {
+      "main": [
+        [
+          {
+            "node": "Analyse Project & Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyse Project & Filter": {
+      "main": [
+        [
+          {
+            "node": "AI Project Summary",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge AI Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Next Batch": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Projects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Email If Any": {
+      "main": [
+        [
+          {
+            "node": "Send via Resend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Project Analysis": {
+      "main": [
+        [
+          {
+            "node": "Next Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Project Summary": {
+      "main": [
+        [
+          {
+            "node": "Merge AI Summary",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Project Summary",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge AI Summary": {
+      "main": [
+        [
+          {
+            "node": "Finalize Project Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Warsaw",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "versionId": "rpl-homepage-monitor-mnisw-v6"
+}
