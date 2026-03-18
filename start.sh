@@ -18,78 +18,42 @@ export OWNER_RECOVERY_INFO
 
 mkdir -p /home/node/.n8n
 
-write_recovery_state() {
-  export OWNER_RECOVERY_STATUS="$1"
-  export OWNER_RECOVERY_MESSAGE="${2:-}"
+if [ ! -f "$OWNER_RECOVERY_MARKER" ]; then
+  export OWNER_RECOVERY_PASSWORD="$(python3 - <<'PY'
+import secrets
+print("N8N-" + secrets.token_urlsafe(18))
+PY
+)"
+
   python3 - <<'PY'
 import json
 import os
 from pathlib import Path
 
-payload = {
-    "status": os.environ["OWNER_RECOVERY_STATUS"],
+Path(os.environ["OWNER_RECOVERY_INFO"]).write_text(json.dumps({
+    "status": "bootstrapping",
     "email": os.environ["OWNER_RECOVERY_EMAIL"],
-    "password": os.environ["OWNER_RECOVERY_PASSWORD"],
-}
-
-message = os.environ.get("OWNER_RECOVERY_MESSAGE")
-if message:
-    payload["message"] = message
-
-Path(os.environ["OWNER_RECOVERY_INFO"]).write_text(
-    json.dumps(payload, ensure_ascii=True),
-    encoding="utf-8",
-)
+    "password": os.environ["OWNER_RECOVERY_PASSWORD"]
+}, ensure_ascii=True), encoding="utf-8")
 PY
-}
-
-if [ ! -f "$OWNER_RECOVERY_MARKER" ]; then
-  export OWNER_RECOVERY_PASSWORD="$(python3 - <<'PY'
-import json
-import os
-import secrets
-from pathlib import Path
-
-info_path = Path(os.environ["OWNER_RECOVERY_INFO"])
-if info_path.exists():
-    try:
-        payload = json.loads(info_path.read_text(encoding="utf-8"))
-        password = payload.get("password")
-        if password:
-            print(password)
-            raise SystemExit
-    except Exception:
-        pass
-
-print("N8N-" + secrets.token_urlsafe(18))
-PY
-)"
-
-  write_recovery_state "bootstrapping"
 
   python3 /app/scripts/owner_recovery_server.py "$OWNER_RECOVERY_INFO" "$N8N_PORT" &
   RECOVERY_SERVER_PID=$!
 
-  write_recovery_state "resetting"
-  if ! n8n user-management:reset; then
-    write_recovery_state "error" "user-management-reset-failed"
-    sleep 300
-    exit 1
-  fi
+  n8n user-management:reset
 
-  write_recovery_state "starting_recovery_n8n"
   N8N_PORT=5679 N8N_HOST=127.0.0.1 n8n start &
   RECOVERY_N8N_PID=$!
 
-  write_recovery_state "waiting_for_recovery_n8n"
-  if ! python3 - <<'PY'
+  python3 - <<'PY'
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 
 base = "http://127.0.0.1:5679"
-deadline = time.time() + 600
+deadline = time.time() + 120
 
 while time.time() < deadline:
     try:
@@ -117,16 +81,14 @@ request = urllib.request.Request(
 
 with urllib.request.urlopen(request, timeout=15) as response:
     response.read()
-PY
-  then
-    write_recovery_state "error" "recovery-n8n-timeout-or-owner-setup-failed"
-    kill "$RECOVERY_N8N_PID" 2>/dev/null || true
-    wait "$RECOVERY_N8N_PID" 2>/dev/null || true
-    sleep 300
-    exit 1
-  fi
 
-  write_recovery_state "ready"
+with open(os.environ["OWNER_RECOVERY_INFO"], "w", encoding="utf-8") as handle:
+    json.dump({
+        "status": "ready",
+        "email": os.environ["OWNER_RECOVERY_EMAIL"],
+        "password": os.environ["OWNER_RECOVERY_PASSWORD"]
+    }, handle)
+PY
 
   kill "$RECOVERY_N8N_PID" 2>/dev/null || true
   wait "$RECOVERY_N8N_PID" 2>/dev/null || true
