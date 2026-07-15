@@ -1,5 +1,6 @@
 import json
 import re
+import time
 import unicodedata
 from datetime import datetime, timezone
 from urllib.parse import quote, urlencode
@@ -49,13 +50,25 @@ def matched_scope_labels(value: str, scope: str) -> list[str]:
     return [label for label, pattern in SCOPE_PATTERNS[scope] if pattern.search(normalized)]
 
 
+def with_retries(operation, attempts: int = 3, base_delay: float = 1.5):
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            return operation()
+        except Exception as exc:
+            last_error = exc
+            if attempt + 1 < attempts:
+                time.sleep(base_delay * (attempt + 1))
+    raise last_error
+
+
 def fetch_json(url: str):
-    data, _, _ = fetch_bytes(url)
+    data, _, _ = with_retries(lambda: fetch_bytes(url))
     return json.loads(data.decode("utf-8-sig"))
 
 
 def fetch_text(url: str) -> str:
-    data, _, _ = fetch_bytes(url)
+    data, _, _ = with_retries(lambda: fetch_bytes(url))
     decoded = data.decode("utf-8", errors="ignore")
     return clean_html(decoded) if "<" in decoded and ">" in decoded else clean_text(decoded)
 
@@ -231,7 +244,9 @@ def _enrich_question(record: dict, source_type: str, scope: str, fetch_content: 
         if attachment_url:
             reply_document_url = attachment_url
             try:
-                reply_text, _, reply_document_url = extract_document_text(attachment_url)
+                reply_text, _, reply_document_url = with_retries(
+                    lambda: extract_document_text(attachment_url)
+                )
                 reply_text = clean_text(reply_text)[:16000]
             except Exception:
                 reply_text = ""
@@ -386,7 +401,9 @@ def _enrich_print(record: dict, scope: str, term: int) -> dict:
     if attachment:
         attachment_url = f"{SEJM_API}/term{term}/prints/{quote(number, safe='')}/{quote(attachment, safe='')}"
         try:
-            attachment_text, _, attachment_url = extract_document_text(attachment_url)
+            attachment_text, _, attachment_url = with_retries(
+                lambda: extract_document_text(attachment_url)
+            )
             attachment_text = clean_text(attachment_text)[:24000]
         except Exception:
             attachment_text = ""

@@ -41,6 +41,22 @@ def test_paginated_array_reads_every_page(monkeypatch):
     assert offsets == [0, 100]
 
 
+def test_fetch_json_retries_transient_read_failures(monkeypatch):
+    module = load_module("sejm_research_retry")
+    attempts = []
+
+    def flaky_fetch(url):
+        attempts.append(url)
+        if len(attempts) < 3:
+            raise TimeoutError("temporary read timeout")
+        return b'{"ok": true}', "application/json", url
+
+    monkeypatch.setattr(module, "fetch_bytes", flaky_fetch)
+    monkeypatch.setattr(module.time, "sleep", lambda seconds: None)
+    assert module.fetch_json("https://api.example/data") == {"ok": True}
+    assert len(attempts) == 3
+
+
 def test_eli_research_uses_publication_dates_and_supported_parameter_names(monkeypatch):
     module = load_module("sejm_research_eli")
     captured = {}
