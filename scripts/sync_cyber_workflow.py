@@ -17,6 +17,7 @@ for node_name, source_path in SOURCES.items():
 
 workflow["id"] = "cmSjm260419t3iA"
 workflow["active"] = False
+workflow["tags"] = []
 WORKFLOW_PATH.write_text(
     json.dumps(workflow, ensure_ascii=False, indent=2) + "\n",
     encoding="utf-8",

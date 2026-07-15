@@ -402,11 +402,7 @@
       "recurrenceRules": []
     }
   },
-  "tags": [
-    "sejm",
-    "cyberbezpieczenstwo",
-    "newsletter"
-  ],
+  "tags": [],
   "meta": {
     "instanceId": "familyos-n8n-proxmox",
     "updatedFor": "n8n 2.15.0 on Proxmox CT 105",

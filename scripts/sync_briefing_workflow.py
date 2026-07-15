@@ -80,6 +80,7 @@ workflow["connections"] = {
 }
 workflow["id"] = "9cDqVFh4KQBYw7ic"
 workflow["active"] = False
+workflow["tags"] = []
 
 WORKFLOW_PATH.write_text(
     json.dumps(workflow, ensure_ascii=False, indent=2) + "\n",
