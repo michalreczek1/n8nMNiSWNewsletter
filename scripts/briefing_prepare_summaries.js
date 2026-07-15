@@ -28,9 +28,20 @@ const questions = [
   ...(Array.isArray(data.zapytania) ? data.zapytania.map(item => compactQuestion(item, 'zapytanie poselskie')) : []),
 ];
 
-return [{
-  json: {
-    ...data,
-    summaryInput: JSON.stringify({ questions }),
-  },
+const inputs = questions.length ? questions : [{
+  id: '__none__',
+  kind: 'brak pozycji',
+  title: 'Brak pytań do podsumowania',
+  recipients: [],
+  questionText: 'Brak pytań do podsumowania.',
+  replyStatus: 'no-answer',
+  replyAuthor: '',
+  replyDate: '',
+  replyText: '',
 }];
+
+return inputs.map(question => ({
+  json: {
+    summaryInput: JSON.stringify(question),
+  },
+}));

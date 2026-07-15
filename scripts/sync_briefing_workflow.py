@@ -8,6 +8,7 @@ NORMALIZE_PATH = ROOT / "scripts" / "briefing_normalize_research.js"
 FILTER_PATH = ROOT / "scripts" / "briefing_relevance_filter.js"
 BUILD_PATH = ROOT / "scripts" / "briefing_build_newsletter.js"
 PREPARE_SUMMARIES_PATH = ROOT / "scripts" / "briefing_prepare_summaries.js"
+COLLECT_SUMMARIES_PATH = ROOT / "scripts" / "briefing_collect_summaries.js"
 APPLY_SUMMARIES_PATH = ROOT / "scripts" / "briefing_apply_summaries.js"
 
 
@@ -57,20 +58,11 @@ prepare_summaries = {
 summary_schema = {
     "type": "object",
     "properties": {
-        "summaries": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string"},
-                    "questionSummary": {"type": "string"},
-                    "answerSummary": {"type": "string"},
-                },
-                "required": ["id", "questionSummary", "answerSummary"],
-            },
-        }
+        "id": {"type": "string"},
+        "questionSummary": {"type": "string"},
+        "answerSummary": {"type": "string"},
     },
-    "required": ["summaries"],
+    "required": ["id", "questionSummary", "answerSummary"],
 }
 
 ai_summaries = {
@@ -85,7 +77,7 @@ ai_summaries = {
         "inputSchema": json.dumps(summary_schema, ensure_ascii=False),
         "options": {
             "systemPromptTemplate": (
-                "Jesteś analitykiem parlamentarnym. Zwróć wyłącznie JSON zgodny ze schematem i przygotuj po jednym wpisie dla każdego id. "
+                "Jesteś analitykiem parlamentarnym. Zwróć wyłącznie JSON zgodny ze schematem. Przepisz id dokładnie z wejścia. "
                 "Pisz po polsku, konkretnie i wyłącznie na podstawie przekazanego materiału. questionSummary ma mieć 2-3 zdania: wyjaśnij problem lub kontekst oraz czego dokładnie chcą dowiedzieć się posłowie. "
                 "Nie kopiuj nagłówków, metadanych, numeru interpelacji ani formuł grzecznościowych. Nie streszczaj samym tytułem. "
                 "answerSummary ma mieć 2-4 zdania i wskazywać, kto odpowiedział, jakie stanowisko zajął oraz jakie podał decyzje, terminy, liczby lub dalsze działania. "
@@ -105,10 +97,22 @@ groq_model = {
     "position": [1420, -150],
     "parameters": {
         "model": "llama-3.3-70b-versatile",
-        "options": {"temperature": 0.2, "maxTokensToSample": 3000},
+        "options": {"temperature": 0.2, "maxTokensToSample": 1000},
     },
     "credentials": {
         "groqApi": {"id": "j4jwLe5JW6aKUJ0O", "name": "Groq account"}
+    },
+}
+
+collect_summaries = {
+    "id": "briefing-collect-summaries",
+    "name": "Zbierz podsumowania AI",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [1660, 40],
+    "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": COLLECT_SUMMARIES_PATH.read_text(encoding="utf-8"),
     },
 }
 
@@ -117,7 +121,7 @@ merge_summaries = {
     "name": "Scal briefing i podsumowania",
     "type": "n8n-nodes-base.merge",
     "typeVersion": 3.2,
-    "position": [1660, 250],
+    "position": [1900, 250],
     "parameters": {"mode": "combine", "combineBy": "combineByPosition", "options": {}},
 }
 
@@ -126,7 +130,7 @@ apply_summaries = {
     "name": "Zastosuj podsumowania",
     "type": "n8n-nodes-base.code",
     "typeVersion": 2,
-    "position": [1900, 250],
+    "position": [2140, 250],
     "parameters": {
         "mode": "runOnceForAllItems",
         "jsCode": APPLY_SUMMARIES_PATH.read_text(encoding="utf-8"),
@@ -135,10 +139,10 @@ apply_summaries = {
 
 build = by_name["Buduj HTML newsletter"]
 build["parameters"]["jsCode"] = BUILD_PATH.read_text(encoding="utf-8")
-build["position"] = [2140, 250]
+build["position"] = [2380, 250]
 
 send = by_name["Resend: wyślij email"]
-send["position"] = [2380, 250]
+send["position"] = [2620, 250]
 send["credentials"] = {
     "httpHeaderAuth": {
         "id": "8pIewAUkFsshffYZ",
@@ -164,6 +168,7 @@ workflow["nodes"].extend([
     prepare_summaries,
     ai_summaries,
     groq_model,
+    collect_summaries,
     merge_summaries,
     apply_summaries,
 ])
@@ -182,7 +187,8 @@ workflow["connections"] = {
         ]]
     },
     "Przygotuj materiał do syntezy": connection("AI: Podsumuj pytania i odpowiedzi"),
-    "AI: Podsumuj pytania i odpowiedzi": {
+    "AI: Podsumuj pytania i odpowiedzi": connection("Zbierz podsumowania AI"),
+    "Zbierz podsumowania AI": {
         "main": [[{"node": "Scal briefing i podsumowania", "type": "main", "index": 1}]]
     },
     "Groq Chat Model": {

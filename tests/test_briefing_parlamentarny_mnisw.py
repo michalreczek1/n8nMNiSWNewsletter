@@ -11,6 +11,7 @@ FILTER_SOURCE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "briefing
 NORMALIZE_SOURCE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "briefing_normalize_research.js"
 BUILD_SOURCE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "briefing_build_newsletter.js"
 PREPARE_SUMMARIES_PATH = Path(__file__).resolve().parents[1] / "scripts" / "briefing_prepare_summaries.js"
+COLLECT_SUMMARIES_PATH = Path(__file__).resolve().parents[1] / "scripts" / "briefing_collect_summaries.js"
 APPLY_SUMMARIES_PATH = Path(__file__).resolve().parents[1] / "scripts" / "briefing_apply_summaries.js"
 SMOKE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "smoke_briefing_research.py"
 
@@ -198,8 +199,10 @@ def test_workflow_uses_grounded_ai_summaries_with_fallback_path():
     prepare = get_node(workflow, "Przygotuj materiał do syntezy")
     ai = get_node(workflow, "AI: Podsumuj pytania i odpowiedzi")
     model = get_node(workflow, "Groq Chat Model")
+    collect = get_node(workflow, "Zbierz podsumowania AI")
     apply = get_node(workflow, "Zastosuj podsumowania")
     assert prepare["parameters"]["jsCode"] == PREPARE_SUMMARIES_PATH.read_text(encoding="utf-8")
+    assert collect["parameters"]["jsCode"] == COLLECT_SUMMARIES_PATH.read_text(encoding="utf-8")
     assert apply["parameters"]["jsCode"] == APPLY_SUMMARIES_PATH.read_text(encoding="utf-8")
     assert ai["type"] == "@n8n/n8n-nodes-langchain.informationExtractor"
     assert ai["continueOnFail"] is True
@@ -208,6 +211,7 @@ def test_workflow_uses_grounded_ai_summaries_with_fallback_path():
     assert model["parameters"]["model"] == "llama-3.3-70b-versatile"
     assert model["credentials"]["groqApi"]["id"] == "j4jwLe5JW6aKUJ0O"
     assert workflow["connections"]["Groq Chat Model"]["ai_languageModel"][0][0]["node"] == ai["name"]
+    assert workflow["connections"][ai["name"]]["main"][0][0]["node"] == collect["name"]
 
 
 def test_filter_node_uses_source_policies_and_explainability():

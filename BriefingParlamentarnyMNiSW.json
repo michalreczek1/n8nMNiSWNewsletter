@@ -112,7 +112,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "function cleanText(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction shorten(value, maxLength) {\n  const text = cleanText(value);\n  if (text.length <= maxLength) return text;\n  return `${text.slice(0, maxLength).replace(/\\s+\\S*$/, '').replace(/[,:;\\-–—\\s]+$/, '')}...`;\n}\n\nfunction compactQuestion(item, kind) {\n  return {\n    id: String(item.num || item.url || ''),\n    kind,\n    title: cleanText(item.title),\n    recipients: Array.isArray(item.recipients) ? item.recipients.map(cleanText).filter(Boolean) : [],\n    questionText: shorten(item.bodyText || item.summary || '', 7000),\n    replyStatus: cleanText(item.replyStatus || 'no-answer'),\n    replyAuthor: cleanText(item.replyAuthor),\n    replyDate: cleanText(item.replyDate),\n    replyText: shorten(item.replyText || item.replySummary || '', 7000),\n  };\n}\n\nconst data = $json;\nconst questions = [\n  ...(Array.isArray(data.interpelacje) ? data.interpelacje.map(item => compactQuestion(item, 'interpelacja')) : []),\n  ...(Array.isArray(data.zapytania) ? data.zapytania.map(item => compactQuestion(item, 'zapytanie poselskie')) : []),\n];\n\nreturn [{\n  json: {\n    ...data,\n    summaryInput: JSON.stringify({ questions }),\n  },\n}];\n"
+        "jsCode": "function cleanText(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction shorten(value, maxLength) {\n  const text = cleanText(value);\n  if (text.length <= maxLength) return text;\n  return `${text.slice(0, maxLength).replace(/\\s+\\S*$/, '').replace(/[,:;\\-–—\\s]+$/, '')}...`;\n}\n\nfunction compactQuestion(item, kind) {\n  return {\n    id: String(item.num || item.url || ''),\n    kind,\n    title: cleanText(item.title),\n    recipients: Array.isArray(item.recipients) ? item.recipients.map(cleanText).filter(Boolean) : [],\n    questionText: shorten(item.bodyText || item.summary || '', 7000),\n    replyStatus: cleanText(item.replyStatus || 'no-answer'),\n    replyAuthor: cleanText(item.replyAuthor),\n    replyDate: cleanText(item.replyDate),\n    replyText: shorten(item.replyText || item.replySummary || '', 7000),\n  };\n}\n\nconst data = $json;\nconst questions = [\n  ...(Array.isArray(data.interpelacje) ? data.interpelacje.map(item => compactQuestion(item, 'interpelacja')) : []),\n  ...(Array.isArray(data.zapytania) ? data.zapytania.map(item => compactQuestion(item, 'zapytanie poselskie')) : []),\n];\n\nconst inputs = questions.length ? questions : [{\n  id: '__none__',\n  kind: 'brak pozycji',\n  title: 'Brak pytań do podsumowania',\n  recipients: [],\n  questionText: 'Brak pytań do podsumowania.',\n  replyStatus: 'no-answer',\n  replyAuthor: '',\n  replyDate: '',\n  replyText: '',\n}];\n\nreturn inputs.map(question => ({\n  json: {\n    summaryInput: JSON.stringify(question),\n  },\n}));\n"
       }
     },
     {
@@ -128,7 +128,7 @@
         "model": "llama-3.3-70b-versatile",
         "options": {
           "temperature": 0.2,
-          "maxTokensToSample": 3000
+          "maxTokensToSample": 1000
         }
       },
       "credentials": {
@@ -150,12 +150,26 @@
       "parameters": {
         "text": "={{ $json.summaryInput || '{\"questions\":[]}' }}",
         "schemaType": "manual",
-        "inputSchema": "{\"type\": \"object\", \"properties\": {\"summaries\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"properties\": {\"id\": {\"type\": \"string\"}, \"questionSummary\": {\"type\": \"string\"}, \"answerSummary\": {\"type\": \"string\"}}, \"required\": [\"id\", \"questionSummary\", \"answerSummary\"]}}}, \"required\": [\"summaries\"]}",
+        "inputSchema": "{\"type\": \"object\", \"properties\": {\"id\": {\"type\": \"string\"}, \"questionSummary\": {\"type\": \"string\"}, \"answerSummary\": {\"type\": \"string\"}}, \"required\": [\"id\", \"questionSummary\", \"answerSummary\"]}",
         "options": {
-          "systemPromptTemplate": "Jesteś analitykiem parlamentarnym. Zwróć wyłącznie JSON zgodny ze schematem i przygotuj po jednym wpisie dla każdego id. Pisz po polsku, konkretnie i wyłącznie na podstawie przekazanego materiału. questionSummary ma mieć 2-3 zdania: wyjaśnij problem lub kontekst oraz czego dokładnie chcą dowiedzieć się posłowie. Nie kopiuj nagłówków, metadanych, numeru interpelacji ani formuł grzecznościowych. Nie streszczaj samym tytułem. answerSummary ma mieć 2-4 zdania i wskazywać, kto odpowiedział, jakie stanowisko zajął oraz jakie podał decyzje, terminy, liczby lub dalsze działania. Jeśli replyStatus nie jest 'answered', nie twórz odpowiedzi merytorycznej: zwięźle opisz rzeczywisty status. Nie dopowiadaj faktów, których nie ma w źródle. Gdy materiał jest niepełny, powiedz to wprost."
+          "systemPromptTemplate": "Jesteś analitykiem parlamentarnym. Zwróć wyłącznie JSON zgodny ze schematem. Przepisz id dokładnie z wejścia. Pisz po polsku, konkretnie i wyłącznie na podstawie przekazanego materiału. questionSummary ma mieć 2-3 zdania: wyjaśnij problem lub kontekst oraz czego dokładnie chcą dowiedzieć się posłowie. Nie kopiuj nagłówków, metadanych, numeru interpelacji ani formuł grzecznościowych. Nie streszczaj samym tytułem. answerSummary ma mieć 2-4 zdania i wskazywać, kto odpowiedział, jakie stanowisko zajął oraz jakie podał decyzje, terminy, liczby lub dalsze działania. Jeśli replyStatus nie jest 'answered', nie twórz odpowiedzi merytorycznej: zwięźle opisz rzeczywisty status. Nie dopowiadaj faktów, których nie ma w źródle. Gdy materiał jest niepełny, powiedz to wprost."
         }
       },
       "continueOnFail": true
+    },
+    {
+      "id": "briefing-collect-summaries",
+      "name": "Zbierz podsumowania AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function cleanText(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim();\n}\n\nconst summaries = $input.all()\n  .map(item => item.json?.output)\n  .filter(output => output && typeof output === 'object')\n  .map(output => ({\n    id: cleanText(output.id),\n    questionSummary: cleanText(output.questionSummary),\n    answerSummary: cleanText(output.answerSummary),\n  }))\n  .filter(output => output.id && output.id !== '__none__');\n\nreturn [{ json: { output: { summaries } } }];\n"
+      }
     },
     {
       "id": "briefing-merge-summaries",
@@ -163,7 +177,7 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
       "position": [
-        1660,
+        1900,
         250
       ],
       "parameters": {
@@ -178,7 +192,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1900,
+        2140,
         250
       ],
       "parameters": {
@@ -196,7 +210,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2140,
+        2380,
         250
       ]
     },
@@ -229,7 +243,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2380,
+        2620,
         250
       ],
       "credentials": {
@@ -324,6 +338,17 @@
       ]
     },
     "AI: Podsumuj pytania i odpowiedzi": {
+      "main": [
+        [
+          {
+            "node": "Zbierz podsumowania AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zbierz podsumowania AI": {
       "main": [
         [
           {
