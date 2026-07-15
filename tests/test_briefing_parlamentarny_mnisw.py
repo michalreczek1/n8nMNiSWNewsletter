@@ -201,18 +201,27 @@ def test_workflow_uses_grounded_ai_summaries_with_fallback_path():
     ai = get_node(workflow, "AI: Podsumuj pytania i odpowiedzi")
     model = get_node(workflow, "Groq Chat Model")
     collect = get_node(workflow, "Zbierz podsumowania AI")
+    loop = get_node(workflow, "Podsumuj po jednej pozycji")
+    wait = get_node(workflow, "Odczekaj między podsumowaniami")
+    next_summary = get_node(workflow, "Następne podsumowanie")
     apply = get_node(workflow, "Zastosuj podsumowania")
     assert prepare["parameters"]["jsCode"] == PREPARE_SUMMARIES_PATH.read_text(encoding="utf-8")
     assert collect["parameters"]["jsCode"] == COLLECT_SUMMARIES_PATH.read_text(encoding="utf-8")
     assert apply["parameters"]["jsCode"] == APPLY_SUMMARIES_PATH.read_text(encoding="utf-8")
     assert ai["type"] == "@n8n/n8n-nodes-langchain.informationExtractor"
     assert ai["continueOnFail"] is True
+    assert ai["retryOnFail"] is True
+    assert ai["maxTries"] == 3
+    assert loop["parameters"]["batchSize"] == 1
+    assert wait["parameters"]["amount"] == 15
     assert "questionSummary" in ai["parameters"]["inputSchema"]
     assert "answerSummary" in ai["parameters"]["inputSchema"]
     assert model["parameters"]["model"] == "llama-3.3-70b-versatile"
     assert model["credentials"]["groqApi"]["id"] == "j4jwLe5JW6aKUJ0O"
     assert workflow["connections"]["Groq Chat Model"]["ai_languageModel"][0][0]["node"] == ai["name"]
-    assert workflow["connections"][ai["name"]]["main"][0][0]["node"] == collect["name"]
+    assert workflow["connections"][ai["name"]]["main"][0][0]["node"] == next_summary["name"]
+    assert workflow["connections"][loop["name"]]["main"][1][0]["node"] == wait["name"]
+    assert workflow["connections"][loop["name"]]["main"][0][0]["node"] == collect["name"]
 
 
 def test_filter_node_uses_source_policies_and_explainability():
@@ -232,6 +241,7 @@ def test_filter_node_uses_source_policies_and_explainability():
     assert "matchedTitleLabels" in code
     assert "matchedDetailLabels" in code
     assert "buildReviewDiagnostics" in code
+    assert "semantic-summary-v2" in code
 
 
 def test_filter_node_uses_word_boundaries_not_short_substrings():

@@ -55,6 +55,24 @@ prepare_summaries = {
     },
 }
 
+loop_summaries = {
+    "id": "briefing-loop-summaries",
+    "name": "Podsumuj po jednej pozycji",
+    "type": "n8n-nodes-base.splitInBatches",
+    "typeVersion": 3,
+    "position": [1380, 40],
+    "parameters": {"batchSize": 1, "options": {}},
+}
+
+wait_between_summaries = {
+    "id": "briefing-wait-summaries",
+    "name": "Odczekaj między podsumowaniami",
+    "type": "n8n-nodes-base.wait",
+    "typeVersion": 1.1,
+    "position": [1580, 40],
+    "parameters": {"resume": "timeInterval", "amount": 15, "unit": "seconds"},
+}
+
 summary_schema = {
     "type": "object",
     "properties": {
@@ -70,7 +88,7 @@ ai_summaries = {
     "name": "AI: Podsumuj pytania i odpowiedzi",
     "type": "@n8n/n8n-nodes-langchain.informationExtractor",
     "typeVersion": 1.2,
-    "position": [1420, 40],
+    "position": [1820, 40],
     "parameters": {
         "text": "={{ $json.summaryInput || '{\"questions\":[]}' }}",
         "schemaType": "manual",
@@ -87,6 +105,9 @@ ai_summaries = {
         },
     },
     "continueOnFail": True,
+    "retryOnFail": True,
+    "maxTries": 3,
+    "waitBetweenTries": 10000,
 }
 
 groq_model = {
@@ -94,7 +115,7 @@ groq_model = {
     "name": "Groq Chat Model",
     "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
     "typeVersion": 1,
-    "position": [1420, -150],
+    "position": [1820, -150],
     "parameters": {
         "model": "llama-3.3-70b-versatile",
         "options": {"temperature": 0.2, "maxTokensToSample": 1000},
@@ -109,11 +130,20 @@ collect_summaries = {
     "name": "Zbierz podsumowania AI",
     "type": "n8n-nodes-base.code",
     "typeVersion": 2,
-    "position": [1660, 40],
+    "position": [2300, 40],
     "parameters": {
         "mode": "runOnceForAllItems",
         "jsCode": COLLECT_SUMMARIES_PATH.read_text(encoding="utf-8"),
     },
+}
+
+next_summary = {
+    "id": "briefing-next-summary",
+    "name": "Następne podsumowanie",
+    "type": "n8n-nodes-base.noOp",
+    "typeVersion": 1,
+    "position": [2060, 40],
+    "parameters": {},
 }
 
 merge_summaries = {
@@ -121,7 +151,7 @@ merge_summaries = {
     "name": "Scal briefing i podsumowania",
     "type": "n8n-nodes-base.merge",
     "typeVersion": 3.2,
-    "position": [1900, 250],
+    "position": [2540, 250],
     "parameters": {"mode": "combine", "combineBy": "combineByPosition", "options": {}},
 }
 
@@ -130,7 +160,7 @@ apply_summaries = {
     "name": "Zastosuj podsumowania",
     "type": "n8n-nodes-base.code",
     "typeVersion": 2,
-    "position": [2140, 250],
+    "position": [2780, 250],
     "parameters": {
         "mode": "runOnceForAllItems",
         "jsCode": APPLY_SUMMARIES_PATH.read_text(encoding="utf-8"),
@@ -139,10 +169,10 @@ apply_summaries = {
 
 build = by_name["Buduj HTML newsletter"]
 build["parameters"]["jsCode"] = BUILD_PATH.read_text(encoding="utf-8")
-build["position"] = [2380, 250]
+build["position"] = [3020, 250]
 
 send = by_name["Resend: wyślij email"]
-send["position"] = [2620, 250]
+send["position"] = [3260, 250]
 send["credentials"] = {
     "httpHeaderAuth": {
         "id": "8pIewAUkFsshffYZ",
@@ -166,9 +196,12 @@ workflow["nodes"] = [
 workflow["nodes"].extend([research, normalize])
 workflow["nodes"].extend([
     prepare_summaries,
+    loop_summaries,
+    wait_between_summaries,
     ai_summaries,
     groq_model,
     collect_summaries,
+    next_summary,
     merge_summaries,
     apply_summaries,
 ])
@@ -186,8 +219,16 @@ workflow["connections"] = {
             {"node": "Scal briefing i podsumowania", "type": "main", "index": 0},
         ]]
     },
-    "Przygotuj materiał do syntezy": connection("AI: Podsumuj pytania i odpowiedzi"),
-    "AI: Podsumuj pytania i odpowiedzi": connection("Zbierz podsumowania AI"),
+    "Przygotuj materiał do syntezy": connection("Podsumuj po jednej pozycji"),
+    "Podsumuj po jednej pozycji": {
+        "main": [
+            [{"node": "Zbierz podsumowania AI", "type": "main", "index": 0}],
+            [{"node": "Odczekaj między podsumowaniami", "type": "main", "index": 0}],
+        ]
+    },
+    "Odczekaj między podsumowaniami": connection("AI: Podsumuj pytania i odpowiedzi"),
+    "AI: Podsumuj pytania i odpowiedzi": connection("Następne podsumowanie"),
+    "Następne podsumowanie": connection("Podsumuj po jednej pozycji"),
     "Zbierz podsumowania AI": {
         "main": [[{"node": "Scal briefing i podsumowania", "type": "main", "index": 1}]]
     },

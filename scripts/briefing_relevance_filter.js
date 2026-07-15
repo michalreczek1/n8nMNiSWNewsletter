@@ -216,6 +216,7 @@ function applyDedupe(items, source, staticData) {
     const id = String(item.num || item.number || item.eli || item.ELI || item.url || '');
     const key = `${source}:${id}`;
     const currentFingerprint = fingerprint([
+      'semantic-summary-v2',
       item.lastModified,
       item.sentDate,
       item.changeDate,
