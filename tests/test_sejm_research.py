@@ -127,6 +127,70 @@ def test_question_metadata_path_does_not_fetch_nested_reply(monkeypatch):
     assert item["researchQuality"] == "metadata"
 
 
+def test_prolongation_is_classified_separately_from_substantive_answer(monkeypatch):
+    module = load_module("sejm_research_prolongation")
+    record = {
+        "num": 17725,
+        "title": "Interpelacja w sprawie minimum kadrowego na wydziałach prawa i uczelniach",
+        "sentDate": "2026-06-23",
+        "lastModified": "2026-07-10T10:00:00",
+        "recipientDetails": [{"name": "minister nauki i szkolnictwa wyższego"}],
+        "links": [{"rel": "body", "href": "https://api.example/17725/body"}],
+        "replies": [{
+            "from": "Sekretarz stanu Marek Gzik",
+            "lastModified": "2026-07-10T10:00:00",
+            "receiptDate": "2026-07-10",
+            "prolongation": True,
+            "links": [],
+        }],
+    }
+    monkeypatch.setattr(module, "fetch_paginated_array", lambda *args, **kwargs: [record])
+    monkeypatch.setattr(module, "fetch_text", lambda url: "Pytanie dotyczy minimum kadrowego na wydziałach prawa uczelni publicznych.")
+    items, _ = module.research_questions(
+        "interpellations", "2026-07-06", "2026-07-13", "mnisw", 10, 20
+    )
+    assert items[0]["eventType"] == "deadline-extension"
+    assert items[0]["replyStatus"] == "deadline-extension"
+    assert items[0]["replyAuthor"] == "Sekretarz stanu Marek Gzik"
+    assert items[0]["replyText"] == ""
+
+
+def test_attachment_only_reply_is_extracted_and_marked_answered(monkeypatch):
+    module = load_module("sejm_research_reply_attachment")
+    record = {
+        "num": 17801,
+        "title": "Interpelacja w sprawie Rady Narodowego Centrum Nauki",
+        "recipientDetails": [{"name": "minister nauki"}],
+        "links": [{"rel": "body", "href": "https://api.example/17801/body"}],
+        "replies": [{
+            "from": "Sekretarz stanu Marek Gzik",
+            "receiptDate": "2026-07-06",
+            "lastModified": "2026-07-08T22:00:44",
+            "onlyAttachment": True,
+            "prolongation": False,
+            "attachments": [{
+                "name": "i17801-o1.pdf",
+                "URL": "https://api.example/attachment/i17801-o1.pdf",
+            }],
+            "links": [{"rel": "body", "href": "https://api.example/17801/reply/body"}],
+        }],
+    }
+    monkeypatch.setattr(module, "fetch_text", lambda url: "Treść odpowiedzi znajduje się w załączniku." if "/reply/" in url else "Pytanie o powołanie Rady NCN i zasady reprezentacji nauki.")
+    monkeypatch.setattr(
+        module,
+        "extract_document_text",
+        lambda url: (
+            "Minister wyjaśnił tryb powołania zespołu i kryteria wyboru członków Rady Narodowego Centrum Nauki.",
+            "application/pdf",
+            url,
+        ),
+    )
+    item = module._enrich_question(record, "interpellations", "mnisw", fetch_content=True)
+    assert item["replyStatus"] == "answered"
+    assert "Minister wyjaśnił tryb powołania" in item["replyText"]
+    assert item["replyDocumentUrl"].endswith("i17801-o1.pdf")
+
+
 def test_scope_labels_do_not_promote_generic_sectoral_research_institutes():
     module = load_module("sejm_research_scope")
     assert module.matched_scope_labels(

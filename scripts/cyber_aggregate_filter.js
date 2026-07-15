@@ -79,12 +79,6 @@ const signalDefs = [
     weight: 4,
     reason: 'Pozycja dotyczy platform internetowych, mediow spolecznosciowych lub dezinformacji, czyli obszaru bezpieczenstwa informacji publicznej.',
     patterns: ['platforma internetowa', 'platformy internetowe', 'media spolecznosciowe', 'dezinformac']
-  },
-  {
-    label: 'komisja cyfryzacji',
-    weight: 4,
-    reason: 'Pozycja pochodzi z Komisji Cyfryzacji, Innowacyjnosci i Nowoczesnych Technologii, wiec moze dotyczyc regulacji cyfrowych lub technologicznych.',
-    patterns: ['komisja cyfryzacji innowacyjnosci i nowoczesnych technologii', 'cyfryzacji innowacyjnosci i nowoczesnych technologii']
   }
 ].map((signal) => ({ ...signal, normalized: signal.patterns.map(normalize).filter(Boolean) }));
 const relevance = (...parts) => {
@@ -98,7 +92,8 @@ const relevance = (...parts) => {
   return {
     score,
     labels: hits.map((hit) => hit.label),
-    reason: hits.map((hit) => hit.reason).filter((reason, index, arr) => arr.indexOf(reason) === index).join(' ')
+    reason: hits.map((hit) => hit.reason).filter((reason, index, arr) => arr.indexOf(reason) === index).join(' '),
+    patterns: hits.flatMap((hit) => hit.normalized)
   };
 };
 const relevantRows = (items, partsFn, minScore = 4) => items
@@ -123,6 +118,25 @@ const uniqBy = (items, keyFn) => {
     seen.add(key);
     return true;
   });
+};
+const relevantExcerpt = (value, rel, maxLength = 900) => {
+  const text = stripHtml(value);
+  if (!text) return '';
+  const patterns = Array.isArray(rel?.patterns) ? rel.patterns : [];
+  const chunks = text
+    .split(/(?<=[.!?])\s+|\s+[–—]\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const matched = chunks.filter((part) => {
+    const normalized = ` ${normalize(part)} `;
+    return patterns.some((pattern) => matchesPattern(normalized, pattern));
+  });
+  if (matched.length) return matched.slice(0, 3).join(' ').slice(0, maxLength);
+  const normalizedText = ` ${normalize(text)} `;
+  const indexes = patterns.map((pattern) => normalizedText.indexOf(pattern)).filter((index) => index >= 0);
+  if (!indexes.length) return text.slice(0, maxLength);
+  const start = Math.max(0, Math.min(...indexes) - 250);
+  return text.slice(start, start + maxLength).replace(/^\S*\s/, '').trim();
 };
 const pairedIndex = (item, fallback) => {
   const paired = item?.pairedItem;
@@ -186,18 +200,21 @@ const filteredActs = relevantRows(uniqueActs.filter((act) => inRange(act.promulg
   .sort((a, b) => String(b.item.promulgation || '').localeCompare(String(a.item.promulgation || '')))
   .slice(0, 14)
   .map(({ item: act, rel }) => ({ type: act.publisher === 'MP' ? 'Monitor Polski' : 'Dziennik Ustaw', title: stripHtml(act.title) || 'Brak tytulu', number: act.displayAddress || act.ELI || '', date: String(act.promulgation || '').slice(0, 10), reason: rel.reason, signals: rel.labels, meta: [act.displayAddress || act.ELI, act.type, act.status].filter(Boolean).join(' | '), url: act.ELI ? `https://api.sejm.gov.pl/eli/acts/${act.ELI}/text.pdf` : 'https://api.sejm.gov.pl/eli' }));
-const filteredCommittees = relevantRows(payloads.committees.filter((s) => inRange(s.date || s.startDateTime)), (s) => [s.code === 'CNT' ? 'Komisja Cyfryzacji Innowacyjnosci i Nowoczesnych Technologii' : '', s.agenda, s.video?.map((v) => `${v.title} ${v.description}`).join(' ')])
+const filteredCommittees = relevantRows(payloads.committees.filter((s) => inRange(s.date || s.startDateTime)), (s) => [s.agenda, s.video?.map((v) => `${v.title} ${v.description}`).join(' ')])
   .sort((a, b) => String(b.item.startDateTime || b.item.date || '').localeCompare(String(a.item.startDateTime || a.item.date || '')))
   .slice(0, 14)
-  .map(({ item: s, rel }) => ({ type: s.video?.[0]?.type || 'Komisja/podkomisja', title: stripHtml(s.video?.[0]?.title || s.code || `Posiedzenie ${s.num || ''}`), number: [s.code, s.num ? `nr ${s.num}` : ''].filter(Boolean).join(' '), date: String(s.startDateTime || s.date || '').slice(0, 10), reason: rel.reason, signals: rel.labels, meta: [s.room, s.status, s.remote ? 'zdalne' : 'stacjonarne'].filter(Boolean).join(' | '), body: stripHtml(s.agenda || s.video?.[0]?.description || '').slice(0, 900), url: s.video?.[0]?.playerLink || 'https://www.sejm.gov.pl/Sejm10.nsf/agent.xsp?symbol=KOMISJE_STALE' }));
+  .map(({ item: s, rel }) => ({ type: s.video?.[0]?.type || 'Komisja/podkomisja', title: stripHtml(s.video?.[0]?.title || s.code || `Posiedzenie ${s.num || ''}`), number: [s.code, s.num ? `nr ${s.num}` : ''].filter(Boolean).join(' '), date: String(s.startDateTime || s.date || '').slice(0, 10), reason: rel.reason, signals: rel.labels, meta: [s.room, s.status, s.remote ? 'zdalne' : 'stacjonarne'].filter(Boolean).join(' | '), body: relevantExcerpt(s.agenda || s.video?.[0]?.description || '', rel), url: s.video?.[0]?.playerLink || 'https://www.sejm.gov.pl/Sejm10.nsf/agent.xsp?symbol=KOMISJE_STALE' }));
 const filteredVotings = relevantRows(payloads.votingDetails.filter((v) => inRange(v.date)), (v) => [v.topic, v.title])
   .sort((a, b) => String(b.item.date || '').localeCompare(String(a.item.date || '')))
   .slice(0, 12)
   .map(({ item: v, rel }) => ({ type: 'Glosowanie', title: stripHtml(v.topic || v.title || 'Glosowanie'), number: v.votingNumber ? `nr ${v.votingNumber}` : '', date: String(v.date || '').slice(0, 10), reason: rel.reason, signals: rel.labels, meta: [`posiedzenie ${v.sitting || '?'}`, `za ${v.yes ?? 0}`, `przeciw ${v.no ?? 0}`, `wstrz. ${v.abstain ?? 0}`].join(' | '), url: Array.isArray(v.links) ? firstLink(v.links, 'pdf') : '' }));
-const recentProceedings = relevantRows(payloads.proceedings.filter((p) => Array.isArray(p.dates) ? p.dates.some(inRange) : inRange(p.date)), (p) => [p.title, p.agenda])
+// Posiedzenie Sejmu jest kontenerem dla wielu niepowiązanych punktów. Do monitora
+// trafia tylko wtedy, gdy sam tytuł posiedzenia jest tematyczny; konkretne sprawy
+// cyber wyłapują osobno druki, komisje i głosowania.
+const recentProceedings = relevantRows(payloads.proceedings.filter((p) => Array.isArray(p.dates) ? p.dates.some(inRange) : inRange(p.date)), (p) => [p.title])
   .sort((a, b) => String((b.item.dates || [b.item.date || ''])[0]).localeCompare(String((a.item.dates || [a.item.date || ''])[0])))
   .slice(0, 8)
-  .map(({ item: p, rel }) => ({ type: 'Posiedzenie Sejmu', title: stripHtml(p.title) || `Posiedzenie nr ${p.number || p.num || ''}`, number: p.number || p.num || '', date: Array.isArray(p.dates) ? p.dates.filter(inRange).join(', ') : String(p.date || '').slice(0, 10), reason: rel.reason, signals: rel.labels, meta: Array.isArray(p.dates) ? p.dates.join(', ') : String(p.date || '').slice(0, 10), body: stripHtml(p.agenda || '').slice(0, 900) }));
+  .map(({ item: p, rel }) => ({ type: 'Posiedzenie Sejmu', title: stripHtml(p.title) || `Posiedzenie nr ${p.number || p.num || ''}`, number: p.number || p.num || '', date: Array.isArray(p.dates) ? p.dates.filter(inRange).join(', ') : String(p.date || '').slice(0, 10), reason: rel.reason, signals: rel.labels, meta: Array.isArray(p.dates) ? p.dates.join(', ') : String(p.date || '').slice(0, 10), body: relevantExcerpt(p.title || '', rel) }));
 const sections = {
   prints: uniqBy(filteredPrints, (x) => `print-${x.number}-${x.title}`),
   acts: uniqBy(filteredActs, (x) => `act-${x.number}-${x.title}`),

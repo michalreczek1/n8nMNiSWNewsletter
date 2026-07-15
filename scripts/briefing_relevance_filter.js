@@ -269,7 +269,8 @@ function analyseQuestion(item, sourcePolicy) {
     ...evaluation,
     kind: sourcePolicy === 'writtenQuestions' ? 'Zapytanie poselskie' : 'Interpelacja',
     recipientsText: recipients.join(', '),
-    hasReply: Boolean(normalizeText(item.replyText) || (Array.isArray(item.replies) && item.replies.length)),
+    hasReply: item.replyStatus === 'answered' || Boolean(normalizeText(item.replyText)),
+    hasDeadlineExtension: item.replyStatus === 'deadline-extension',
   };
 }
 

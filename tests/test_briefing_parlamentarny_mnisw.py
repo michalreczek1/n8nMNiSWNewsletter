@@ -10,6 +10,8 @@ WORKFLOW_PATH = Path(__file__).resolve().parents[1] / "BriefingParlamentarnyMNiS
 FILTER_SOURCE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "briefing_relevance_filter.js"
 NORMALIZE_SOURCE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "briefing_normalize_research.js"
 BUILD_SOURCE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "briefing_build_newsletter.js"
+PREPARE_SUMMARIES_PATH = Path(__file__).resolve().parents[1] / "scripts" / "briefing_prepare_summaries.js"
+APPLY_SUMMARIES_PATH = Path(__file__).resolve().parents[1] / "scripts" / "briefing_apply_summaries.js"
 SMOKE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "smoke_briefing_research.py"
 
 
@@ -191,6 +193,23 @@ def test_normalize_and_build_nodes_match_checked_in_source_files():
     assert build == BUILD_SOURCE_PATH.read_text(encoding="utf-8")
 
 
+def test_workflow_uses_grounded_ai_summaries_with_fallback_path():
+    workflow = load_workflow()
+    prepare = get_node(workflow, "Przygotuj materiał do syntezy")
+    ai = get_node(workflow, "AI: Podsumuj pytania i odpowiedzi")
+    model = get_node(workflow, "Groq Chat Model")
+    apply = get_node(workflow, "Zastosuj podsumowania")
+    assert prepare["parameters"]["jsCode"] == PREPARE_SUMMARIES_PATH.read_text(encoding="utf-8")
+    assert apply["parameters"]["jsCode"] == APPLY_SUMMARIES_PATH.read_text(encoding="utf-8")
+    assert ai["type"] == "@n8n/n8n-nodes-langchain.informationExtractor"
+    assert ai["continueOnFail"] is True
+    assert "questionSummary" in ai["parameters"]["inputSchema"]
+    assert "answerSummary" in ai["parameters"]["inputSchema"]
+    assert model["parameters"]["model"] == "llama-3.3-70b-versatile"
+    assert model["credentials"]["groqApi"]["id"] == "j4jwLe5JW6aKUJ0O"
+    assert workflow["connections"]["Groq Chat Model"]["ai_languageModel"][0][0]["node"] == ai["name"]
+
+
 def test_filter_node_uses_source_policies_and_explainability():
     workflow = load_workflow()
     code = get_node(workflow, "Filtruj i scoruj (MNiSW)")["parameters"]["jsCode"]
@@ -251,6 +270,7 @@ def test_filter_and_newsletter_execute_on_enriched_fixture():
             "recipients": ["minister nauki"],
             "bodyText": "Pytanie dotyczy finansowania badań naukowych i dotacji dla uczelni publicznych.",
             "replyText": "",
+            "replyStatus": "no-answer",
             "summary": "Pytanie dotyczy finansowania badań naukowych i dotacji dla uczelni publicznych.",
             "replySummary": "",
             "researchQuality": "full-text",
@@ -267,12 +287,59 @@ def test_filter_and_newsletter_execute_on_enriched_fixture():
         },
         "sourceErrors": [],
     }
-    result = smoke.run_javascript(research)
+    result = smoke.run_javascript(research, [{
+        "id": "42",
+        "questionSummary": "Posłowie pytają o zasady finansowania badań i podział dotacji między uczelnie publiczne. Chcą poznać planowane kwoty oraz kryteria ich przyznawania.",
+        "answerSummary": "Odpowiedź nie została jeszcze opublikowana.",
+    }])
     assert result["briefingStatus"] == "matches"
     assert result["stats"]["interpelacje"] == 1
     assert result["titles"]["interpelacje"][0]["quality"] == "full-text"
     assert result["mail"]["htmlLength"] > 1000
-    assert "Co wynika ze źródła" in result["mail"]["textPreview"]
+    assert "O co pyta poseł" in result["mail"]["textPreview"]
+    assert "Co wynika ze źródła" not in result["mail"]["textPreview"]
+    assert "Odpowiedź organu nie została jeszcze opublikowana" in result["mail"]["textPreview"]
+
+
+def test_deadline_extension_is_not_presented_as_substantive_answer():
+    smoke = load_smoke_module()
+    research = {
+        "dateFrom": "2026-07-06",
+        "dateTo": "2026-07-13",
+        "interpellations": [{
+            "num": 17725,
+            "title": "Interpelacja w sprawie minimum kadrowego na wydziałach prawa",
+            "sentDate": "2026-06-23",
+            "eventDate": "2026-07-10",
+            "eventType": "deadline-extension",
+            "recipients": ["minister nauki i szkolnictwa wyższego"],
+            "bodyText": "Posłowie pytają o przywrócenie minimum kadrowego na wydziałach prawa i konsultacje z uczelniami.",
+            "replyText": "",
+            "replyStatus": "deadline-extension",
+            "replyAuthor": "Sekretarz stanu Marek Gzik",
+            "summary": "Pytanie dotyczy przywrócenia minimum kadrowego na wydziałach prawa.",
+            "researchQuality": "full-text",
+            "url": "https://sejm.example/17725",
+        }],
+        "writtenQuestions": [], "prints": [], "eliActs": [],
+        "sources": {
+            "interpellations": {"checked": 1, "withinWindow": 1, "enriched": 1},
+            "writtenQuestions": {"checked": 0, "withinWindow": 0, "enriched": 0},
+            "prints": {"checked": 0, "withinWindow": 0, "enriched": 0},
+            "eliActs": {"checked": 0, "withinWindow": 0, "enriched": 0},
+        },
+        "sourceErrors": [],
+    }
+    result = smoke.run_javascript(research, [{
+        "id": "17725",
+        "questionSummary": "Posłowie pytają o podstawy i możliwość przywrócenia minimum kadrowego na wydziałach prawa oraz zakres konsultacji ze środowiskiem akademickim.",
+        "answerSummary": "Minister poparł przywrócenie minimum kadrowego.",
+    }])
+    preview = result["mail"]["textPreview"]
+    assert "Przedłużono termin odpowiedzi" in preview
+    assert "odpowiedź merytoryczna nie została jeszcze opublikowana" in preview.lower()
+    assert "Minister poparł" not in preview
+    assert "Jest odpowiedź" not in preview
 
 
 def test_filter_rejects_sectoral_research_institutes_outside_mnisw_scope():

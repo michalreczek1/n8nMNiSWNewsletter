@@ -136,6 +136,50 @@ def test_filter_rejects_old_changed_act_and_recipient_only_question():
     assert result["sections"]["acts"][0]["date"] == "2026-07-14"
 
 
+def test_filter_requires_substantive_cyber_topic_for_committees_and_sittings():
+    ctx = {"dateFrom": "2026-07-08", "dateTo": "2026-07-15"}
+    source_items = [
+        {"json": {"source": "proceedings", "kind": "proceedings", "dateContext": ctx}},
+        {"json": {"source": "committees", "kind": "committees", "dateContext": ctx}},
+    ]
+    responses = [
+        {"json": [{
+            "number": 62,
+            "title": "62. Posiedzenie Sejmu RP w dniach 15, 16 i 17 lipca 2026 r.",
+            "dates": ["2026-07-15"],
+            "agenda": "Sprawozdanie komisji sprawiedliwości. Informacja Komisji Cyfryzacji, Innowacyjności i Nowoczesnych Technologii. Punkt o krajowym systemie cyberbezpieczeństwa.",
+        }], "pairedItem": {"item": 0}},
+        {"json": [
+            {
+                "code": "CNT", "num": 101, "date": "2026-07-14",
+                "agenda": "Rozpatrzenie informacji o zabezpieczeniu społecznym i świadczeniach rodzinnych.",
+            },
+            {
+                "code": "CNT", "num": 102, "date": "2026-07-14",
+                "agenda": "Informacja organizacyjna o posiedzeniu. Rozpatrzenie projektu ustawy o krajowym systemie cyberbezpieczeństwa i wdrożeniu NIS2. Sprawy bieżące.",
+            },
+        ], "pairedItem": {"item": 1}},
+    ]
+    result = run_node(FILTER_PATH.read_text(encoding="utf-8"), {
+        "Przygotuj URL-e zrodel": source_items,
+        "Pobierz zrodla": responses,
+        "Przygotuj URL-e glosowan": [],
+        "Pobierz szczegoly glosowan": [],
+    })[0]["json"]
+
+    assert result["sections"]["proceedings"] == []
+    assert [item["number"] for item in result["sections"]["committees"]] == ["CNT nr 102"]
+    assert "krajowym systemie cyberbezpieczeństwa" in result["sections"]["committees"][0]["body"]
+    assert "zabezpieczeniu społecznym" not in result["sections"]["committees"][0]["body"]
+
+
+def test_filter_does_not_use_committee_name_as_cyber_signal():
+    source = FILTER_PATH.read_text(encoding="utf-8")
+    assert "label: 'komisja cyfryzacji'" not in source
+    assert "s.code === 'CNT'" not in source
+    assert "(p) => [p.title, p.agenda]" not in source
+
+
 def test_sources_compile_in_n8n_function_wrapper():
     for path in (PREPARE_PATH, FILTER_PATH):
         source = path.read_text(encoding="utf-8")

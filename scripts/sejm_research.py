@@ -145,6 +145,12 @@ def _evidence_summary(text: str, scope: str, max_length: int = 900) -> str:
     if not text:
         return ""
     sentences = [clean_text(part) for part in re.split(r"(?<=[.!?])\s+", text) if len(clean_text(part)) >= 45]
+    boilerplate = re.compile(
+        r"\b(interpelacja\s+nr|zapytanie\s+nr|zglaszajac|data\s+wplywu|adresat|"
+        r"warszawa,?\s+dnia|szanown(?:y|a)\s+pan(?:ie|i))\b",
+        re.IGNORECASE,
+    )
+    sentences = [sentence for sentence in sentences if not boilerplate.search(normalize_for_match(sentence))]
     matched = [sentence for sentence in sentences if matched_scope_labels(sentence, scope)]
     selected = matched[:2] or sentences[:2]
     summary = clean_text(" ".join(selected))
@@ -161,14 +167,37 @@ def _recipient_names(record: dict) -> list[str]:
     return [value for value in names if value]
 
 
-def _latest_reply_link(record: dict) -> str:
+def _reply_sort_key(reply: dict) -> str:
+    return str(reply.get("lastModified") or reply.get("receiptDate") or "")
+
+
+def _latest_reply(record: dict) -> dict:
     replies = [reply for reply in record.get("replies") or [] if isinstance(reply, dict)]
-    replies.sort(key=lambda value: str(value.get("lastModified") or value.get("receiptDate") or ""), reverse=True)
-    for reply in replies:
-        for link in reply.get("links") or []:
-            if isinstance(link, dict) and link.get("rel") == "body" and link.get("href"):
-                return link["href"]
+    replies.sort(key=_reply_sort_key, reverse=True)
+    return replies[0] if replies else {}
+
+
+def _reply_body_link(reply: dict) -> str:
+    for link in reply.get("links") or []:
+        if isinstance(link, dict) and link.get("rel") == "body" and link.get("href"):
+            return link["href"]
     return ""
+
+
+def _reply_attachment_url(reply: dict) -> str:
+    attachments = [value for value in reply.get("attachments") or [] if isinstance(value, dict)]
+    usable = [
+        value
+        for value in attachments
+        if not clean_text(value.get("name")).lower().endswith((".xades", ".xml", ".sig"))
+    ]
+    supported = [
+        value
+        for value in usable
+        if clean_text(value.get("name")).lower().endswith((".pdf", ".docx", ".docm", ".doc"))
+    ]
+    attachment = (supported or usable or [{}])[0]
+    return clean_text(attachment.get("URL") or attachment.get("url") or attachment.get("href"))
 
 
 def _enrich_question(record: dict, source_type: str, scope: str, fetch_content: bool = True) -> dict:
@@ -180,18 +209,40 @@ def _enrich_question(record: dict, source_type: str, scope: str, fetch_content: 
     seed_labels = matched_scope_labels(seed_text, scope)
     body_text = ""
     reply_text = ""
+    reply_document_url = ""
+    latest_reply = _latest_reply(item)
+    is_prolongation = bool(latest_reply.get("prolongation"))
+    reply_author = clean_text(latest_reply.get("from"))
+    reply_date = _date_part(latest_reply.get("receiptDate") or latest_reply.get("lastModified"))
     body_url = _body_link(item)
     if fetch_content and seed_labels and body_url:
         try:
             body_text = fetch_text(body_url)[:16000]
         except Exception:
             body_text = ""
-    reply_url = _latest_reply_link(item)
-    if fetch_content and seed_labels and reply_url:
+    reply_url = _reply_body_link(latest_reply)
+    if fetch_content and seed_labels and reply_url and not is_prolongation:
         try:
             reply_text = fetch_text(reply_url)[:12000]
         except Exception:
             reply_text = ""
+    if fetch_content and seed_labels and not is_prolongation and (latest_reply.get("onlyAttachment") or not reply_text):
+        attachment_url = _reply_attachment_url(latest_reply)
+        if attachment_url:
+            reply_document_url = attachment_url
+            try:
+                reply_text, _, reply_document_url = extract_document_text(attachment_url)
+                reply_text = clean_text(reply_text)[:16000]
+            except Exception:
+                reply_text = ""
+    if is_prolongation:
+        reply_status = "deadline-extension"
+    elif latest_reply and reply_text:
+        reply_status = "answered"
+    elif latest_reply:
+        reply_status = "unreadable-answer"
+    else:
+        reply_status = "no-answer"
     labels = matched_scope_labels(" ".join([seed_text, body_text, reply_text]), scope)
     item.update(
         {
@@ -199,6 +250,10 @@ def _enrich_question(record: dict, source_type: str, scope: str, fetch_content: 
             "recipients": recipients,
             "bodyText": body_text,
             "replyText": reply_text,
+            "replyStatus": reply_status,
+            "replyAuthor": reply_author,
+            "replyDate": reply_date,
+            "replyDocumentUrl": reply_document_url,
             "summary": _evidence_summary(body_text, scope),
             "replySummary": _evidence_summary(reply_text, scope),
             "researchText": clean_text(" ".join([title, body_text, reply_text]))[:26000],
@@ -241,16 +296,32 @@ def research_questions(
             for field in ("sentDate", "receiptDate")
             if _in_window(record.get(field), date_from, date_to)
         ]
-        reply_event_dates = [
-            _date_part(reply.get(field))
+        recent_replies = [
+            reply
             for reply in record.get("replies") or []
             if isinstance(reply, dict)
+            and any(_in_window(reply.get(field), date_from, date_to) for field in ("lastModified", "receiptDate"))
+        ]
+        reply_event_dates = [
+            _date_part(reply.get(field))
+            for reply in recent_replies
             for field in ("lastModified", "receiptDate")
             if _in_window(reply.get(field), date_from, date_to)
         ]
         if not new_event_dates and not reply_event_dates:
             continue
-        event_type = "new-and-answered" if new_event_dates and reply_event_dates else ("answer-update" if reply_event_dates else "new")
+        has_substantive_reply = any(not reply.get("prolongation") for reply in recent_replies)
+        has_extension = any(bool(reply.get("prolongation")) for reply in recent_replies)
+        if new_event_dates and has_substantive_reply:
+            event_type = "new-and-answered"
+        elif has_substantive_reply:
+            event_type = "answer-update"
+        elif new_event_dates and has_extension:
+            event_type = "new-and-extension"
+        elif has_extension:
+            event_type = "deadline-extension"
+        else:
+            event_type = "new"
         event_date = max([*new_event_dates, *reply_event_dates])
         within_window.append({**record, "eventType": event_type, "eventDate": event_date})
     within_window.sort(

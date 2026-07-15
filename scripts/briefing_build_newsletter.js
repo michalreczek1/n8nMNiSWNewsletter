@@ -30,6 +30,19 @@ function renderMetaText(parts) {
 }
 
 function renderEvidenceHtml(item) {
+  const isQuestion = Object.prototype.hasOwnProperty.call(item, 'replyStatus') || Boolean(item.questionSummary);
+  if (isQuestion) {
+    const question = shorten(item.questionSummary || item.summary);
+    const answer = shorten(item.answerSummary || item.replySummary);
+    const blocks = [];
+    if (question) blocks.push(`<p style="margin:0 0 8px"><strong>O co pyta poseł:</strong> ${escapeHtml(question)}</p>`);
+    if (answer) {
+      const label = item.replyStatus === 'answered' ? 'Co odpowiedział organ:' : 'Status odpowiedzi:';
+      blocks.push(`<p style="margin:0 0 8px"><strong>${label}</strong> ${escapeHtml(answer)}</p>`);
+    }
+    blocks.push(`<p style="margin:0;color:#1e3a5f"><strong>Dlaczego w briefingu:</strong> ${escapeHtml(item.decisionReason)}</p>`);
+    return blocks.join('');
+  }
   const summary = shorten(item.summary);
   const reply = shorten(item.replySummary);
   const blocks = [];
@@ -40,6 +53,19 @@ function renderEvidenceHtml(item) {
     blocks.unshift('<p style="margin:0 0 8px;color:#64748b">API nie udostępniło czytelnej treści dokumentu; kwalifikacja opiera się na tytule i metadanych.</p>');
   }
   return blocks.join('');
+}
+
+function questionEventLabel(item, noun) {
+  if (item.eventType === 'deadline-extension' || item.eventType === 'new-and-extension') return `Przedłużono termin odpowiedzi na ${noun}`;
+  if (item.eventType === 'answer-update' || item.eventType === 'new-and-answered') return `Opublikowano odpowiedź na ${noun}`;
+  return noun === 'interpelację' ? 'Nowa interpelacja w badanym okresie' : 'Nowe zapytanie w badanym okresie';
+}
+
+function questionReplyLabel(item) {
+  if (item.replyStatus === 'answered') return 'Jest odpowiedź merytoryczna';
+  if (item.replyStatus === 'deadline-extension') return 'Przedłużono termin odpowiedzi';
+  if (item.replyStatus === 'unreadable-answer') return 'Odpowiedź tylko w nieczytelnym załączniku';
+  return 'Bez odpowiedzi';
 }
 
 function renderSection(title, eyebrow, items, renderRow) {
@@ -124,14 +150,14 @@ const alertHtml = sourceErrors && sourceErrors.length
 const interpelacjeHtml = renderSection('Interpelacje', 'Sejm', interpelacje, item => renderRow({
   heading: item.title,
   url: item.url,
-  metaParts: [item.eventDate || item.sentDate || item.receiptDate, item.eventType === 'answer-update' ? 'Nowa odpowiedź do wcześniejszej interpelacji' : 'Nowa interpelacja w badanym okresie', item.recipientsText ? `Do: ${item.recipientsText}` : '', item.hasReply ? 'Jest odpowiedź' : 'Bez odpowiedzi', item.researchQuality === 'full-text' ? 'Sprawdzono treść' : 'Tylko metadane'],
+  metaParts: [item.eventDate || item.sentDate || item.receiptDate, questionEventLabel(item, 'interpelację'), item.recipientsText ? `Do: ${item.recipientsText}` : '', questionReplyLabel(item), item.researchQuality === 'full-text' ? 'Sprawdzono treść' : 'Tylko metadane'],
   bodyHtml: renderEvidenceHtml(item),
 }));
 
 const zapytaniaHtml = renderSection('Zapytania poselskie', 'Sejm', zapytania, item => renderRow({
   heading: item.title,
   url: item.url,
-  metaParts: [item.eventDate || item.sentDate || item.receiptDate, item.eventType === 'answer-update' ? 'Nowa odpowiedź do wcześniejszego zapytania' : 'Nowe zapytanie w badanym okresie', item.recipientsText ? `Do: ${item.recipientsText}` : '', item.hasReply ? 'Jest odpowiedź' : 'Bez odpowiedzi', item.researchQuality === 'full-text' ? 'Sprawdzono treść' : 'Tylko metadane'],
+  metaParts: [item.eventDate || item.sentDate || item.receiptDate, questionEventLabel(item, 'zapytanie'), item.recipientsText ? `Do: ${item.recipientsText}` : '', questionReplyLabel(item), item.researchQuality === 'full-text' ? 'Sprawdzono treść' : 'Tylko metadane'],
   bodyHtml: renderEvidenceHtml(item),
 }));
 
@@ -166,6 +192,13 @@ const shouldRenderEmpty = briefingStatus === 'empty' || (briefingStatus === 'par
 const html = `<!DOCTYPE html><html lang="pl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{margin:0;padding:20px;background:#f1f5f9;font-family:Arial,sans-serif}</style></head><body><div style="max-width:780px;margin:0 auto"><div style="background:linear-gradient(135deg,#163760,#2563eb);color:#fff;border-radius:16px;padding:30px 28px 26px;margin-bottom:20px;box-shadow:0 18px 36px rgba(37,99,235,.20)"><div style="font-size:11px;opacity:.72;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:8px">Monitor Parlamentarny · MNiSW</div><h1 style="margin:0 0 10px;font-size:24px;font-weight:800;line-height:1.25">Tygodniowy Briefing Parlamentarny</h1><div style="max-width:620px;opacity:.92;font-size:14px;line-height:1.7">${escapeHtml(subtitle)}. Wyniki są oparte na oficjalnych danych Sejmu i ELI oraz — gdy API je udostępnia — na treści dokumentów źródłowych.</div>${statsCards}</div>${alertHtml}${scanSummaryHtml}${shouldRenderEmpty ? emptyStateHtml : ''}${sectionsHtml}<div style="margin-top:24px;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:18px 20px;text-align:center"><div style="font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#1e3a5f;margin-bottom:6px">Monitor Parlamentarny · MNiSW</div><div style="font-size:13px;color:#475569;line-height:1.6">Made by Michał Reczek · <a href="mailto:michalreczek@gmail.com" style="color:#1d4ed8;text-decoration:none">michalreczek@gmail.com</a></div><div style="font-size:11px;color:#94a3b8;margin-top:8px">Źródła: api.sejm.gov.pl/sejm · api.sejm.gov.pl/eli · ${escapeHtml(new Date().toLocaleString('pl-PL'))}</div></div></div></body></html>`;
 
 function evidenceText(item) {
+  if (Object.prototype.hasOwnProperty.call(item, 'replyStatus') || item.questionSummary) {
+    return [
+      item.questionSummary || item.summary ? `O co pyta poseł: ${shorten(item.questionSummary || item.summary)}` : '',
+      item.answerSummary || item.replySummary ? `${item.replyStatus === 'answered' ? 'Co odpowiedział organ' : 'Status odpowiedzi'}: ${shorten(item.answerSummary || item.replySummary)}` : '',
+      `Dlaczego w briefingu: ${item.decisionReason}`,
+    ].filter(Boolean).join('\n');
+  }
   return [
     item.summary ? `Co wynika ze źródła: ${shorten(item.summary)}` : '',
     item.replySummary ? `Najnowsza odpowiedź: ${shorten(item.replySummary)}` : '',
@@ -179,8 +212,8 @@ function sectionText(title, items, renderItem) {
   return `${title}\n${items.map(renderItem).join('\n\n')}`;
 }
 
-const interpelacjeText = sectionText('Interpelacje', interpelacje, item => [item.title, `Link: ${item.url}`, renderMetaText([item.eventDate || item.sentDate || item.receiptDate, item.eventType === 'answer-update' ? 'Nowa odpowiedź do wcześniejszej interpelacji' : 'Nowa interpelacja w badanym okresie', item.recipientsText ? `Do: ${item.recipientsText}` : '', item.hasReply ? 'Jest odpowiedź' : 'Bez odpowiedzi']), evidenceText(item)].filter(Boolean).join('\n'));
-const zapytaniaText = sectionText('Zapytania poselskie', zapytania, item => [item.title, `Link: ${item.url}`, renderMetaText([item.eventDate || item.sentDate || item.receiptDate, item.eventType === 'answer-update' ? 'Nowa odpowiedź do wcześniejszego zapytania' : 'Nowe zapytanie w badanym okresie', item.recipientsText ? `Do: ${item.recipientsText}` : '', item.hasReply ? 'Jest odpowiedź' : 'Bez odpowiedzi']), evidenceText(item)].filter(Boolean).join('\n'));
+const interpelacjeText = sectionText('Interpelacje', interpelacje, item => [item.title, `Link: ${item.url}`, renderMetaText([item.eventDate || item.sentDate || item.receiptDate, questionEventLabel(item, 'interpelację'), item.recipientsText ? `Do: ${item.recipientsText}` : '', questionReplyLabel(item)]), evidenceText(item)].filter(Boolean).join('\n'));
+const zapytaniaText = sectionText('Zapytania poselskie', zapytania, item => [item.title, `Link: ${item.url}`, renderMetaText([item.eventDate || item.sentDate || item.receiptDate, questionEventLabel(item, 'zapytanie'), item.recipientsText ? `Do: ${item.recipientsText}` : '', questionReplyLabel(item)]), evidenceText(item)].filter(Boolean).join('\n'));
 const drukiText = sectionText('Druki sejmowe', druki, item => [`Druk nr ${item.number}: ${item.title}`, `Link: ${item.url}`, item.attachmentUrl ? `Dokument: ${item.attachmentUrl}` : '', renderMetaText([item.deliveryDate || (item.changeDate ? item.changeDate.slice(0, 10) : ''), item.documentType || '']), evidenceText(item)].filter(Boolean).join('\n'));
 const aktyText = sectionText('Akty prawne opublikowane w Dzienniku Ustaw', aktyPrawne, item => [item.displayAddress || item.eli, item.title, `Link: ${item.url}`, renderMetaText([item.promulgation ? `Ogłoszono: ${item.promulgation}` : '', item.entryIntoForce ? `Wejście w życie: ${item.entryIntoForce}` : '', item.status || '']), Array.isArray(item.keywords) && item.keywords.length ? `Słowa kluczowe ELI: ${item.keywords.slice(0, 8).join(', ')}` : '', evidenceText(item)].filter(Boolean).join('\n'));
 const textSections = [interpelacjeText, zapytaniaText, drukiText, aktyText].filter(Boolean).join('\n\n---\n\n');
