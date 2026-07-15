@@ -67,3 +67,45 @@ def test_fetch_endpoint_returns_html(monkeypatch):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_sejm_research_endpoint_returns_structured_payload(monkeypatch):
+    monkeypatch.setenv("RCL_HELPER_HOST", "127.0.0.1")
+    monkeypatch.setenv("RCL_HELPER_PORT", "8769")
+    service = load_service_module("rcl_extract_service_sejm_test")
+
+    def fake_research(**kwargs):
+        assert kwargs == {
+            "date_from": "2026-07-06",
+            "date_to": "2026-07-13",
+            "scope": "mnisw",
+            "term": 10,
+            "max_enrich": 12,
+        }
+        return {
+            "status": "ok",
+            "dateFrom": kwargs["date_from"],
+            "dateTo": kwargs["date_to"],
+            "interpellations": [],
+            "writtenQuestions": [],
+            "prints": [],
+            "eliActs": [],
+            "sources": {},
+            "sourceErrors": [],
+        }
+
+    monkeypatch.setattr(service, "research_legal_sources", fake_research)
+    server = ThreadingHTTPServer((service.HOST, service.PORT), service.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    time.sleep(0.2)
+
+    try:
+        body = urlopen(
+            f"http://{service.HOST}:{service.PORT}/sejm-research?dateFrom=2026-07-06&dateTo=2026-07-13&scope=mnisw&term=10&maxEnrich=12",
+            timeout=5,
+        ).read()
+        assert '"status": "ok"' in body.decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()

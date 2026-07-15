@@ -10,6 +10,7 @@ from urllib.parse import urljoin
 from urllib.request import HTTPHandler, HTTPSHandler, Request, build_opener
 
 from docx import Document
+from pypdf import PdfReader
 
 
 HEADERS = {
@@ -116,6 +117,33 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
+def looks_unreadable_text(text: str) -> bool:
+    sample = clean_text(text)[:700]
+    if not sample:
+        return False
+    normalized = sample.lower()
+    binary_markers = (
+        "/type/page",
+        "/flatedecode",
+        "endobj",
+        "xref",
+        "mediabox",
+        "resources<</font",
+        "microsoft office word",
+        "aspose",
+        "pk !",
+        "xmldsig",
+        "<ds:signature",
+        "<ds:signedinfo",
+        "<ds:x509certificate",
+    )
+    if any(marker in normalized for marker in binary_markers):
+        return True
+    letters = sum(ch.isalpha() for ch in sample)
+    suspicious = sum(ch in "{}[]<>|~^`\\" for ch in sample)
+    return len(sample) > 120 and suspicious / len(sample) > 0.08 and letters / len(sample) < 0.55
+
+
 def dedupe_text_blocks(blocks):
     seen = set()
     out = []
@@ -136,6 +164,8 @@ def dedupe_text_blocks(blocks):
 def sanitize_fallback_summary_for_ai(text: str) -> str:
     summary = clean_text(text)
     if not summary:
+        return ""
+    if looks_unreadable_text(summary):
         return ""
     lowered = summary.lower()
     bad_starts = (
@@ -203,9 +233,15 @@ def parse_doc_links(html: str):
 
 
 def choose_doc(doc_links):
-    priorities = ("Uzasadnienie", "Ocena skutków regulacji", "OSR", "Projekt")
+    usable = [
+        doc
+        for doc in doc_links
+        if not doc["url"].lower().endswith((".xades", ".xml", ".sig"))
+        and not doc["label"].lower().endswith((".xades", ".xml", ".sig"))
+    ]
+    priorities = ("uzasadnienie", "ocena skutków regulacji", "osr", "projekt")
     for label in priorities:
-        preferred = [d for d in doc_links if d["label"].lower() == label.lower()]
+        preferred = [d for d in usable if label in d["label"].lower()]
         if preferred:
             return preferred[-1]
     excluded = (
@@ -217,7 +253,7 @@ def choose_doc(doc_links):
     )
     filtered = [
         d
-        for d in doc_links
+        for d in usable
         if not any(marker in d["label"].lower() for marker in excluded)
     ]
     return filtered[-1] if filtered else None
@@ -264,19 +300,47 @@ def extract_doc_text(data: bytes) -> str:
     return clean_text("\n".join(lines))
 
 
+def extract_pdf_text(data: bytes, max_pages: int = 30) -> str:
+    reader = PdfReader(io.BytesIO(data))
+    blocks = []
+    for page in reader.pages[:max_pages]:
+        try:
+            text = clean_text(page.extract_text() or "")
+        except Exception:
+            text = ""
+        if text:
+            blocks.append(text)
+        if sum(len(block) for block in blocks) >= 30000:
+            break
+    return clean_text("\n".join(dedupe_text_blocks(blocks)))[:30000]
+
+
 def extract_document_text(url: str):
     data, content_type, final_url = fetch_bytes(url)
     lowered_url = final_url.lower()
-    if lowered_url.endswith(".docx") or "wordprocessingml.document" in content_type:
+    lowered_content_type = content_type.lower()
+    if lowered_url.endswith((".docx", ".docm")) or "wordprocessingml.document" in lowered_content_type or "macroenabled.12" in lowered_content_type:
         text = extract_docx_text(data)
-    elif lowered_url.endswith(".doc") or "application/msword" in content_type:
+    elif lowered_url.endswith(".doc") or "application/msword" in lowered_content_type:
         text = extract_doc_text(data)
+    elif lowered_url.endswith(".pdf") or "application/pdf" in lowered_content_type:
+        text = extract_pdf_text(data)
+    elif lowered_url.endswith(".zip") or "zip" in lowered_content_type:
+        text = ""
+    elif lowered_url.endswith((".xades", ".xml", ".sig")) or "xml" in lowered_content_type:
+        text = ""
     else:
         text = clean_text(data.decode("utf-8", errors="ignore"))
+    if looks_unreadable_text(text):
+        text = ""
     return text, content_type, final_url
 
 
 def summarize(text: str, title: str) -> str:
+    def is_low_signal(candidate: str) -> bool:
+        normalized = clean_text(candidate).lower()
+        return normalized.startswith("projektowane regulacje nie wprowadzają nowych instrumentów wsparcia")
+
     source = clean_text(text).replace("\n", " ")
     if not source:
         return f"Projekt dotyczy: {title}."
@@ -305,6 +369,7 @@ def summarize(text: str, title: str) -> str:
         r"(Projekt zakłada:[^0-9]{0,900})",
         r"(Projekt zakłada[^.!?]{0,900}[.!?])",
         r"(Projekt przewiduje[^.!?]{0,900}[.!?])",
+        r"(Proponuje się[^.!?]{0,900}[.!?])",
         r"(Zmiana warunku[^.!?]{0,900}[.!?])",
         r"(Projektowane regulacje[^.!?]{0,900}[.!?])",
         r"(Regulacja[^.!?]{0,900}(?:polega|zakłada|umożliwia|rozszerza)[^.!?]{0,900}[.!?])",
@@ -314,17 +379,35 @@ def summarize(text: str, title: str) -> str:
         if match:
             candidate = clean_text(match.group(1))
             candidate = re.split(r"\s+2\)\s+", candidate, maxsplit=1)[0]
-            return candidate[:600]
+            if not is_low_signal(candidate):
+                return candidate[:600]
+    for marker in (
+        "Proponuje się wprowadzenie przepisu",
+        "Proponuje się dokonanie zmian",
+        "Proponuje się wprowadzenie obowiązku",
+        "Dzięki dodatkowym środkom",
+        "W celu zagwarantowania",
+    ):
+        if marker not in source:
+            continue
+        snippet = source[source.find(marker): source.find(marker) + 1000]
+        sentences = re.findall(r"[^.!?]{40,350}[.!?]", snippet)
+        if sentences:
+            candidate = clean_text(" ".join(sentences[:2]))[:600]
+            if not is_low_signal(candidate):
+                return candidate
     sentences = re.findall(r"[^.!?]{40,350}[.!?]", source)
     if sentences:
-        return clean_text(" ".join(sentences[:2]))[:600]
+        candidate = clean_text(" ".join(sentences[:2]))[:600]
+        if not is_low_signal(candidate):
+            return candidate
     return source[:600]
 
 
 def build_ai_context(title: str, applicant: str, stage_label: str, project_type: str, number: str, date_created: str, date_updated: str, document_label: str, chosen_text: str, fallback_summary: str) -> str:
     source = clean_text(chosen_text).replace("\n", " ")
     source = re.sub(r"\s{2,}", " ", source).strip()
-    source = source[:7000]
+    source = source[:3500]
     blocks = [
         f"Tytul referencyjny projektu (nie powtarzaj go doslownie w summary): {clean_text(title)}",
         f"Autor / wnioskodawca: {clean_text(applicant)}",
@@ -388,7 +471,11 @@ def extract_project(project_url: str, from_email: str, to_email: str, days_lookb
             chosen_doc_url = chosen_doc["url"]
             chosen_doc_label = chosen_doc["label"]
             stage_label = find_stage_for_doc(stage_links, chosen_doc["pos"])
-            chosen_text, content_type, chosen_doc_url = extract_document_text(chosen_doc_url)
+            try:
+                chosen_text, content_type, chosen_doc_url = extract_document_text(chosen_doc_url)
+            except Exception:
+                chosen_text = ""
+                content_type = ""
 
         if not stage_label and stage_links:
             stage_label = stage_links[-1]["label"]

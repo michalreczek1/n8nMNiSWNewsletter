@@ -1,0 +1,259 @@
+{
+  "name": "Tygodniowy Briefing Parlamentarny MNiSW",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "When clicking Test workflow",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 1,
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Poniedziałek 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const now = new Date();\nconst today = now.toISOString().split('T')[0];\nconst weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);\nconst weekAgoStr = weekAgo.toISOString().split('T')[0];\n\nconst state = $getWorkflowStaticData('global');\nif (!Array.isArray(state.seenInterpellations)) state.seenInterpellations = [];\nif (!Array.isArray(state.seenPrints)) state.seenPrints = [];\nif (!Array.isArray(state.seenEliActs)) state.seenEliActs = [];\n\nreturn [{\n  json: {\n    dateFrom: weekAgoStr,\n    dateTo: today,\n    weekAgoISO: weekAgo.toISOString().slice(0, 16),\n    fromEmail: 'legislacja@send.familyos.pl',\n    toEmail: 'michalreczek@gmail.com',\n    state: {\n      seenInterpellations: [...state.seenInterpellations],\n      seenPrints: [...state.seenPrints],\n      seenEliActs: [...state.seenEliActs]\n    }\n  }\n}];"
+      },
+      "id": "init-dates",
+      "name": "Init: daty i stan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://127.0.0.1:8765/sejm-research?dateFrom=' + encodeURIComponent($('Init: daty i stan').first().json.dateFrom) + '&dateTo=' + encodeURIComponent($('Init: daty i stan').first().json.dateTo) + '&scope=mnisw&term=10&maxEnrich=8' }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 180000
+        }
+      },
+      "id": "fetch-interpellations",
+      "name": "Research API: Sejm i ELI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        250
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function errorMessage(value) {\n  if (!value || typeof value !== 'object') return null;\n  const candidates = [\n    value.message,\n    value.error && value.error.message,\n    value.error,\n    value.reason,\n    value.description,\n    value.details,\n  ];\n  return candidates.find(candidate => typeof candidate === 'string' && candidate.trim()) || null;\n}\n\nconst all = $input.all();\nif (!all.length) {\n  return [{\n    json: {\n      status: 'partial_error',\n      interpellations: [],\n      writtenQuestions: [],\n      prints: [],\n      eliActs: [],\n      sources: {},\n      sourceErrors: [{ source: 'research', message: 'Helper researchu nie zwrócił odpowiedzi.' }],\n    },\n  }];\n}\n\nconst raw = all[0].json;\nconst message = errorMessage(raw);\nif (message && raw.error) {\n  return [{\n    json: {\n      status: 'partial_error',\n      interpellations: [],\n      writtenQuestions: [],\n      prints: [],\n      eliActs: [],\n      sources: {},\n      sourceErrors: [{ source: 'research', message }],\n    },\n  }];\n}\n\nconst research = raw && typeof raw === 'object' ? raw : {};\nreturn [{\n  json: {\n    ...research,\n    interpellations: Array.isArray(research.interpellations) ? research.interpellations : [],\n    writtenQuestions: Array.isArray(research.writtenQuestions) ? research.writtenQuestions : [],\n    prints: Array.isArray(research.prints) ? research.prints : [],\n    eliActs: Array.isArray(research.eliActs) ? research.eliActs : [],\n    sources: research.sources && typeof research.sources === 'object' ? research.sources : {},\n    sourceErrors: Array.isArray(research.sourceErrors) ? research.sourceErrors : [],\n  },\n}];\n"
+      },
+      "id": "normalize-interpellations",
+      "name": "Normalize: Research",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const SOURCE_LABELS = {\n  interpellations: 'Interpelacje Sejmu',\n  writtenQuestions: 'Zapytania poselskie',\n  prints: 'Druki sejmowe',\n  eliActs: 'ELI / Dziennik Ustaw',\n  research: 'Helper researchu Sejm / ELI',\n};\n\nconst SIGNAL_LABELS = {\n  'higher-education-law': 'Prawo o szkolnictwie wyższym i nauce',\n  'higher-education': 'system szkolnictwa wyższego',\n  universities: 'uczelnie',\n  students: 'studenci i przebieg studiów',\n  doctoral: 'doktoranci, stopnie i habilitacje',\n  'academic-staff': 'nauczyciele akademiccy lub pracownicy naukowi',\n  'science-policy': 'badania i finansowanie nauki',\n  'science-institutions': 'instytucje systemu nauki',\n  scholarships: 'stypendia',\n  accreditation: 'akredytacja i jakość kształcenia',\n  rectors: 'rektorzy',\n  'science-wording': 'kontekst nauki',\n  'school-education': 'oświata i szkoły poza szkolnictwem wyższym',\n  'vocational-schooling': 'szkolnictwo branżowe',\n  'labour-market': 'rynek pracy i urzędy pracy',\n  'social-policy': 'pomoc społeczna',\n};\n\nconst COMMON_POSITIVE_RULES = [\n  { label: 'higher-education-law', pattern: /\\bprawo\\s+o\\s+szkolnictw\\w*\\s+wyższ\\w*\\s+i\\s+nauce\\b/i, weight: 7 },\n  { label: 'higher-education', pattern: /\\bszkolnictw\\w*\\s+wyższ\\w*\\b|\\bkształceni\\w*\\s+wyższ\\w*\\b/i, weight: 6 },\n  { label: 'universities', pattern: /\\buczelni\\w*\\b|\\buniwersytet\\w*\\b|\\bpolitechnik\\w*\\b|\\bszkoł\\w*\\s+wyższ\\w*\\b/i, weight: 5 },\n  { label: 'students', pattern: /\\bstuden\\w*\\b|\\bstudi(?:a|ów|ach|ami|om)\\b/i, weight: 5 },\n  { label: 'doctoral', pattern: /\\bdoktoran\\w*\\b|\\bdoktorat\\w*\\b|\\bhabilitac\\w*\\b|\\bstopni\\w*\\s+naukow\\w*\\b|\\btytuł\\w*\\s+profesor\\w*\\b/i, weight: 5 },\n  { label: 'academic-staff', pattern: /\\bnauczyciel\\w*\\s+akademick\\w*\\b|\\bpracownik\\w*\\s+naukow\\w*\\b/i, weight: 5 },\n  { label: 'science-policy', pattern: /\\bbadan\\w*\\s+naukow\\w*\\b|\\bdziałalnoś\\w*\\s+naukow\\w*\\b|\\bfinansowani\\w*\\s+nauk\\w*\\b|\\bpolityk\\w*\\s+naukow\\w*\\b/i, weight: 5 },\n  // Sam zwrot \"instytut badawczy\" nie wystarcza: wiele takich jednostek\n  // podlega resortom zdrowia, obrony lub rolnictwa, a nie MNiSW.\n  { label: 'science-institutions', pattern: /\\bpolsk\\w*\\s+akademi\\w*\\s+nauk\\w*\\b|\\bnarodow\\w*\\s+centrum\\s+nauk\\w*\\b|\\bnarodow\\w*\\s+centrum\\s+badań\\w*\\s+i\\s+rozwoju\\b|\\bsieć\\w*\\s+badawcz\\w*\\s+łukasiewicz\\b|\\bNAWA\\b|\\bPOL-?on\\b/i, weight: 6 },\n];\n\nconst COMMON_SUPPORTING_RULES = [\n  { label: 'scholarships', pattern: /\\bstypendi\\w*\\b/i, weight: 2 },\n  { label: 'accreditation', pattern: /\\bakredytac\\w*\\b|\\bpolsk\\w*\\s+komisj\\w*\\s+akredytacyjn\\w*\\b/i, weight: 2 },\n  { label: 'rectors', pattern: /\\brektor(?:zy|a|ów|om|ami)?\\b/i, weight: 2 },\n  { label: 'science-wording', pattern: /\\bnauk\\w*\\b|\\bakademick\\w*\\b/i, weight: 1 },\n];\n\nconst COMMON_NEGATIVE_RULES = [\n  { label: 'school-education', pattern: /\\boświat\\w*\\b|\\bprzedszkol\\w*\\b|\\bszkoł\\w*\\s+(?:podstawow\\w*|średni\\w*|artystyczn\\w*)\\b|\\bmatur\\w*\\b|\\bkurator\\w*\\s+oświat\\w*\\b/i, weight: -6 },\n  { label: 'vocational-schooling', pattern: /\\bszkolnictw\\w*\\s+branżow\\w*\\b|\\bmłodocian\\w*\\s+pracownik\\w*\\b/i, weight: -5 },\n  { label: 'labour-market', pattern: /\\burzęd\\w*\\s+pracy\\b|\\bbezrobotn\\w*\\b|\\bbezroboci\\w*\\b/i, weight: -5 },\n  { label: 'social-policy', pattern: /\\bpomoc\\w*\\s+społeczn\\w*\\b|\\bświadczeni\\w*\\s+socjaln\\w*\\b/i, weight: -4 },\n];\n\nconst RECIPIENT_HINT_PATTERNS = [\n  /\\bminister(?:stwo|a|owi|em)?\\s+nauki\\b/i,\n  /\\bminister(?:stwo|a|owi|em)?\\s+nauki\\s+i\\s+szkolnictwa\\s+wyższego\\b/i,\n];\n\nconst sourcePolicies = {\n  interpellations: {\n    sourcePolicy: 'interpellations',\n    positivePatterns: COMMON_POSITIVE_RULES,\n    supportingPatterns: COMMON_SUPPORTING_RULES,\n    negativePatterns: COMMON_NEGATIVE_RULES,\n    acceptThreshold: 5,\n    reviewThreshold: 3,\n    allowRecipientBoost: true,\n    allowPublisherBoost: false,\n  },\n  writtenQuestions: {\n    sourcePolicy: 'writtenQuestions',\n    positivePatterns: COMMON_POSITIVE_RULES,\n    supportingPatterns: COMMON_SUPPORTING_RULES,\n    negativePatterns: COMMON_NEGATIVE_RULES,\n    acceptThreshold: 5,\n    reviewThreshold: 3,\n    allowRecipientBoost: true,\n    allowPublisherBoost: false,\n  },\n  prints: {\n    sourcePolicy: 'prints',\n    positivePatterns: COMMON_POSITIVE_RULES,\n    supportingPatterns: COMMON_SUPPORTING_RULES,\n    negativePatterns: COMMON_NEGATIVE_RULES,\n    acceptThreshold: 5,\n    reviewThreshold: 3,\n    allowRecipientBoost: false,\n    allowPublisherBoost: false,\n  },\n  eli: {\n    sourcePolicy: 'eli',\n    positivePatterns: COMMON_POSITIVE_RULES,\n    supportingPatterns: COMMON_SUPPORTING_RULES,\n    negativePatterns: COMMON_NEGATIVE_RULES,\n    acceptThreshold: 6,\n    reviewThreshold: 4,\n    allowRecipientBoost: false,\n    allowPublisherBoost: true,\n  },\n};\n\nfunction normalizeText(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction uniqueByLabel(matches) {\n  const byLabel = new Map();\n  for (const match of matches) {\n    const previous = byLabel.get(match.label);\n    if (!previous || match.weight > previous.weight) byLabel.set(match.label, match);\n  }\n  return [...byLabel.values()];\n}\n\nfunction findRuleMatches(text, rules, origin) {\n  const source = normalizeText(text);\n  if (!source) return [];\n  return rules\n    .filter(rule => rule.pattern.test(source))\n    .map(rule => ({ ...rule, origin }));\n}\n\nfunction isMniswText(text) {\n  const normalized = normalizeText(text);\n  return RECIPIENT_HINT_PATTERNS.some(pattern => pattern.test(normalized));\n}\n\nfunction labelsToPolish(labels) {\n  return labels.map(label => SIGNAL_LABELS[label] || label);\n}\n\nfunction decisionReason(result) {\n  if (result.decision === 'accept') {\n    const evidence = labelsToPolish(result.matchedPositiveLabels);\n    const location = [];\n    if (result.matchedTitleLabels.length) location.push('tytuł/metadane');\n    if (result.matchedDetailLabels.length) location.push('treść źródłowa');\n    const boosts = [];\n    if (result.recipientBoost) boosts.push('adresatem jest Minister Nauki');\n    if (result.publisherBoost) boosts.push('akt wydał Minister Nauki');\n    return `Istotne dla MNiSW: ${evidence.join(', ')} (${location.join(' i ') || 'metadane'}${boosts.length ? `; ${boosts.join(', ')}` : ''}).`;\n  }\n  if (result.decision === 'review') {\n    const evidence = labelsToPolish(result.matchedPositiveLabels);\n    return `Do przeglądu: ${evidence.join(', ') || 'sygnały są zbyt słabe do automatycznej publikacji'}.`;\n  }\n  if (result.matchedNegativeLabels.length) {\n    return `Poza zakresem: ${labelsToPolish(result.matchedNegativeLabels).join(', ')}.`;\n  }\n  return 'Poza zakresem: brak mocnego związku z nauką lub szkolnictwem wyższym.';\n}\n\nfunction evaluateRecord({ titleText, detailText, policy, recipients = [], publisherText = '' }) {\n  const titlePositive = findRuleMatches(titleText, policy.positivePatterns, 'title');\n  const detailPositive = findRuleMatches(detailText, policy.positivePatterns, 'detail');\n  const positiveMatches = uniqueByLabel([...titlePositive, ...detailPositive]);\n  const supportingMatches = uniqueByLabel([\n    ...findRuleMatches(titleText, policy.supportingPatterns, 'title'),\n    ...findRuleMatches(detailText, policy.supportingPatterns, 'detail'),\n  ]);\n  const negativeMatches = uniqueByLabel([\n    ...findRuleMatches(titleText, policy.negativePatterns, 'title'),\n    ...findRuleMatches(detailText, policy.negativePatterns, 'detail'),\n  ]);\n\n  let score = positiveMatches.reduce((sum, match) => sum + match.weight, 0);\n  score += supportingMatches.reduce((sum, match) => sum + match.weight, 0);\n  score += negativeMatches.reduce((sum, match) => sum + match.weight, 0);\n\n  const recipientNames = (Array.isArray(recipients) ? recipients : [recipients]).map(normalizeText).filter(Boolean);\n  const recipientBoost = policy.allowRecipientBoost && recipientNames.length === 1 && isMniswText(recipientNames[0]) && positiveMatches.length ? 2 : 0;\n  const publisherBoost = policy.allowPublisherBoost && isMniswText(publisherText) && positiveMatches.length ? 2 : 0;\n  score += recipientBoost + publisherBoost;\n\n  let decision = 'reject';\n  if (positiveMatches.length && score >= policy.acceptThreshold) {\n    decision = 'accept';\n  } else if (positiveMatches.length && score >= policy.reviewThreshold) {\n    decision = 'review';\n  }\n\n  const result = {\n    score,\n    decision,\n    sourcePolicy: policy.sourcePolicy,\n    matchedPositiveLabels: positiveMatches.map(match => match.label),\n    matchedSupportingLabels: supportingMatches.map(match => match.label),\n    matchedNegativeLabels: negativeMatches.map(match => match.label),\n    matchedTitleLabels: uniqueByLabel([...titlePositive, ...supportingMatches.filter(match => match.origin === 'title')]).map(match => match.label),\n    matchedDetailLabels: uniqueByLabel([...detailPositive, ...supportingMatches.filter(match => match.origin === 'detail')]).map(match => match.label),\n    recipientBoost,\n    publisherBoost,\n  };\n  result.decisionReason = decisionReason(result);\n  return result;\n}\n\nfunction sourceErrorPayload(error) {\n  const source = normalizeText(error && error.source) || 'research';\n  return {\n    source,\n    label: SOURCE_LABELS[source] || source,\n    message: normalizeText(error && error.message) || 'Nieznany błąd źródła.',\n  };\n}\n\nfunction fingerprint(value) {\n  return JSON.stringify(value);\n}\n\nfunction applyDedupe(items, source, staticData) {\n  if (!staticData.seenEvidence || typeof staticData.seenEvidence !== 'object') staticData.seenEvidence = {};\n  const now = new Date().toISOString();\n  return items.map(item => {\n    const id = String(item.num || item.number || item.eli || item.ELI || item.url || '');\n    const key = `${source}:${id}`;\n    const currentFingerprint = fingerprint([\n      item.lastModified,\n      item.sentDate,\n      item.changeDate,\n      item.deliveryDate,\n      item.promulgation,\n      item.title,\n      item.summary,\n      item.replySummary,\n      item.score,\n    ]);\n    const alreadySent = staticData.seenEvidence[key] && staticData.seenEvidence[key].fingerprint === currentFingerprint;\n    if (!alreadySent && item.decision === 'accept') {\n      staticData.seenEvidence[key] = { fingerprint: currentFingerprint, updatedAt: now };\n    }\n    return { ...item, alreadySent: Boolean(alreadySent) };\n  });\n}\n\nfunction pruneStaticData(staticData) {\n  const entries = Object.entries(staticData.seenEvidence || {});\n  if (entries.length <= 1000) return;\n  entries.sort((left, right) => String(right[1].updatedAt || '').localeCompare(String(left[1].updatedAt || '')));\n  staticData.seenEvidence = Object.fromEntries(entries.slice(0, 1000));\n}\n\nfunction buildReviewDiagnostics(items) {\n  return items\n    .filter(item => item && item.decision === 'review')\n    .sort((left, right) => Number(right.score || 0) - Number(left.score || 0))\n    .slice(0, 10)\n    .map(item => ({\n      id: item.num || item.number || item.eli || item.url,\n      title: item.title,\n      score: item.score,\n      decisionReason: item.decisionReason,\n      matchedPositiveLabels: item.matchedPositiveLabels,\n      matchedNegativeLabels: item.matchedNegativeLabels,\n    }));\n}\n\nfunction analyseQuestion(item, sourcePolicy) {\n  const recipients = Array.isArray(item.recipients) ? item.recipients : [];\n  const evaluation = evaluateRecord({\n    titleText: item.title,\n    detailText: [item.bodyText, item.replyText].filter(Boolean).join(' '),\n    policy: sourcePolicies[sourcePolicy],\n    recipients,\n  });\n  return {\n    ...item,\n    ...evaluation,\n    kind: sourcePolicy === 'writtenQuestions' ? 'Zapytanie poselskie' : 'Interpelacja',\n    recipientsText: recipients.join(', '),\n    hasReply: Boolean(normalizeText(item.replyText) || (Array.isArray(item.replies) && item.replies.length)),\n  };\n}\n\nfunction analysePrint(item) {\n  const evaluation = evaluateRecord({\n    titleText: item.title,\n    detailText: item.attachmentText || item.researchText,\n    policy: sourcePolicies.prints,\n  });\n  return { ...item, ...evaluation };\n}\n\nfunction analyseEli(item) {\n  const publisherText = [\n    ...(Array.isArray(item.releasedBy) ? item.releasedBy : []),\n    ...(Array.isArray(item.authorizedBody) ? item.authorizedBody : []),\n  ].join(' ');\n  const detailText = [\n    ...(Array.isArray(item.keywords) ? item.keywords : []),\n    item.actText,\n  ].filter(Boolean).join(' ');\n  const evaluation = evaluateRecord({\n    titleText: item.title,\n    detailText,\n    policy: sourcePolicies.eli,\n    publisherText,\n  });\n  return { ...item, ...evaluation, eli: item.eli || item.ELI };\n}\n\nfunction sourceStats(research, name) {\n  const stats = research.sources && research.sources[name] ? research.sources[name] : {};\n  return {\n    checked: Number(stats.checked || 0),\n    withinWindow: Number(stats.withinWindow || 0),\n    enriched: Number(stats.enriched || 0),\n  };\n}\n\nfunction runWorkflow() {\n  const research = $input.first().json || {};\n  const initData = $('Init: daty i stan').first().json;\n  const staticData = $getWorkflowStaticData('global');\n\n  const analysedInterpellations = (research.interpellations || []).map(item => analyseQuestion(item, 'interpellations'));\n  const analysedWrittenQuestions = (research.writtenQuestions || []).map(item => analyseQuestion(item, 'writtenQuestions'));\n  const analysedPrints = (research.prints || []).map(analysePrint);\n  const analysedEli = (research.eliActs || []).map(analyseEli);\n\n  const dedupedInterpellations = applyDedupe(analysedInterpellations, 'interpellations', staticData);\n  const dedupedWrittenQuestions = applyDedupe(analysedWrittenQuestions, 'writtenQuestions', staticData);\n  const dedupedPrints = applyDedupe(analysedPrints, 'prints', staticData);\n  const dedupedEli = applyDedupe(analysedEli, 'eli', staticData);\n  pruneStaticData(staticData);\n\n  const interpelacje = dedupedInterpellations\n    .filter(item => item.decision === 'accept' && !item.alreadySent)\n    .sort((left, right) => Number(right.score) - Number(left.score))\n    .slice(0, 20);\n  const zapytania = dedupedWrittenQuestions\n    .filter(item => item.decision === 'accept' && !item.alreadySent)\n    .sort((left, right) => Number(right.score) - Number(left.score))\n    .slice(0, 20);\n  const druki = dedupedPrints\n    .filter(item => item.decision === 'accept' && !item.alreadySent)\n    .sort((left, right) => Number(right.score) - Number(left.score))\n    .slice(0, 20);\n  const aktyPrawne = dedupedEli\n    .filter(item => item.decision === 'accept' && !item.alreadySent)\n    .sort((left, right) => Number(right.score) - Number(left.score))\n    .slice(0, 20);\n\n  const stats = {\n    interpelacje: interpelacje.length,\n    zapytania: zapytania.length,\n    druki: druki.length,\n    aktyPrawne: aktyPrawne.length,\n    total: interpelacje.length + zapytania.length + druki.length + aktyPrawne.length,\n  };\n  const interStats = sourceStats(research, 'interpellations');\n  const questionStats = sourceStats(research, 'writtenQuestions');\n  const printStats = sourceStats(research, 'prints');\n  const eliStats = sourceStats(research, 'eliActs');\n  const scanStats = {\n    interpelacjeChecked: interStats.withinWindow,\n    zapytaniaChecked: questionStats.withinWindow,\n    drukiChecked: printStats.withinWindow,\n    aktyPrawneChecked: eliStats.withinWindow,\n    totalApiRecordsChecked: interStats.checked + questionStats.checked + printStats.checked + eliStats.checked,\n    enriched: interStats.enriched + questionStats.enriched + printStats.enriched + eliStats.enriched,\n  };\n  const sourceErrors = (research.sourceErrors || []).map(sourceErrorPayload);\n  const diagnostics = {\n    interpelacjeReview: buildReviewDiagnostics(dedupedInterpellations),\n    zapytaniaReview: buildReviewDiagnostics(dedupedWrittenQuestions),\n    drukiReview: buildReviewDiagnostics(dedupedPrints),\n    aktyPrawneReview: buildReviewDiagnostics(dedupedEli),\n  };\n  const briefingStatus = sourceErrors.length ? 'partial_error' : stats.total ? 'matches' : 'empty';\n\n  return [{\n    json: {\n      briefingStatus,\n      dateFrom: research.dateFrom || initData.dateFrom,\n      dateTo: research.dateTo || initData.dateTo,\n      generatedAt: research.generatedAt,\n      fromEmail: initData.fromEmail,\n      toEmail: initData.toEmail,\n      interpelacje,\n      zapytania,\n      druki,\n      aktyPrawne,\n      stats,\n      scanStats,\n      sourceErrors,\n      diagnostics,\n    },\n  }];\n}\n\nreturn runWorkflow();\n"
+      },
+      "id": "filter-score",
+      "name": "Filtruj i scoruj (MNiSW)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function escapeHtml(value) {\n  return String(value || '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\nfunction cleanText(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction shorten(value, maxLength = 900) {\n  const text = cleanText(value);\n  if (text.length <= maxLength) return text;\n  return `${text.slice(0, maxLength).replace(/\\s+\\S*$/, '').replace(/[,:;\\-–—\\s]+$/, '')}...`;\n}\n\nfunction renderMetaHtml(parts) {\n  const values = parts.map(cleanText).filter(Boolean);\n  return values\n    .map(value => `<span style=\"display:inline-block;font-size:12px;line-height:1.5;color:#64748b\">${escapeHtml(value)}</span>`)\n    .join('<span style=\"display:inline-block;font-size:12px;line-height:1.5;color:#cbd5e1;padding:0 8px\">|</span>');\n}\n\nfunction renderMetaText(parts) {\n  const values = parts.map(cleanText).filter(Boolean);\n  return values.length ? values.join(' | ') : '';\n}\n\nfunction renderEvidenceHtml(item) {\n  const summary = shorten(item.summary);\n  const reply = shorten(item.replySummary);\n  const blocks = [];\n  if (summary) blocks.push(`<p style=\"margin:0 0 8px\"><strong>Co wynika ze źródła:</strong> ${escapeHtml(summary)}</p>`);\n  if (reply) blocks.push(`<p style=\"margin:0 0 8px\"><strong>Najnowsza odpowiedź:</strong> ${escapeHtml(reply)}</p>`);\n  blocks.push(`<p style=\"margin:0;color:#1e3a5f\"><strong>Dlaczego w briefingu:</strong> ${escapeHtml(item.decisionReason)}</p>`);\n  if (!summary && item.researchQuality === 'metadata') {\n    blocks.unshift('<p style=\"margin:0 0 8px;color:#64748b\">API nie udostępniło czytelnej treści dokumentu; kwalifikacja opiera się na tytule i metadanych.</p>');\n  }\n  return blocks.join('');\n}\n\nfunction renderSection(title, eyebrow, items, renderRow) {\n  if (!items || !items.length) return '';\n  return `\n    <div style=\"background:#ffffff;border:1px solid #dbe4f0;border-radius:14px;padding:20px 20px 6px;margin-bottom:18px;box-shadow:0 8px 24px rgba(15,23,42,.04)\">\n      <div style=\"display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px\">\n        <div>\n          <div style=\"font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.7px;margin-bottom:4px\">${escapeHtml(eyebrow)}</div>\n          <h2 style=\"margin:0;font-size:18px;line-height:1.3;color:#0f172a\">${escapeHtml(title)}</h2>\n        </div>\n        <span style=\"display:inline-block;background:#e0ecff;color:#1d4ed8;border-radius:999px;padding:6px 11px;font-size:12px;font-weight:700\">${items.length}</span>\n      </div>\n      ${items.map(renderRow).join('')}\n    </div>`;\n}\n\nfunction renderRow({ heading, url, metaParts, bodyHtml, secondaryUrl = '', secondaryLabel = '' }) {\n  return `\n    <div style=\"padding:0 0 16px;margin:0 0 16px;border-bottom:1px solid #eef2f7\">\n      <div style=\"margin-bottom:8px;line-height:1.8\">${renderMetaHtml(metaParts || [])}</div>\n      <div style=\"font-size:15px;font-weight:700;color:#0f172a;line-height:1.5;margin-bottom:8px\">${escapeHtml(heading)}</div>\n      <div style=\"font-size:13px;color:#475569;line-height:1.7;margin-bottom:10px\">${bodyHtml}</div>\n      <a href=\"${escapeHtml(url)}\" style=\"display:inline-block;color:#1d4ed8;text-decoration:none;font-weight:700;font-size:12px\">Otwórz pozycję źródłową</a>\n      ${secondaryUrl ? `<span style=\"color:#cbd5e1;padding:0 8px\">|</span><a href=\"${escapeHtml(secondaryUrl)}\" style=\"display:inline-block;color:#1d4ed8;text-decoration:none;font-weight:600;font-size:12px\">${escapeHtml(secondaryLabel || 'Otwórz dokument')}</a>` : ''}\n    </div>`;\n}\n\nconst data = $json;\nconst {\n  briefingStatus,\n  dateFrom,\n  dateTo,\n  interpelacje,\n  zapytania,\n  druki,\n  aktyPrawne,\n  stats,\n  scanStats,\n  sourceErrors,\n} = data;\n\nconst subtitle = `Tydzień ${dateFrom} – ${dateTo}`;\nconst statsCards = `\n  <div style=\"margin-top:22px;display:flex;gap:12px;flex-wrap:wrap\">\n    ${[\n      ['Interpelacje', stats.interpelacje],\n      ['Zapytania', stats.zapytania],\n      ['Druki', stats.druki],\n      ['Akty prawne', stats.aktyPrawne],\n    ].map(([label, value]) => `\n      <div style=\"min-width:132px;flex:1;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:14px 16px;text-align:center\">\n        <div style=\"font-size:28px;font-weight:800;line-height:1\">${value}</div>\n        <div style=\"font-size:11px;opacity:.82;margin-top:8px;text-transform:uppercase;letter-spacing:.7px\">${label}</div>\n      </div>`).join('')}\n  </div>`;\n\nconst scanSummaryHtml = `\n  <div style=\"background:#ffffff;border:1px solid #dbe4f0;border-radius:14px;padding:20px 22px;margin-bottom:18px;box-shadow:0 8px 24px rgba(15,23,42,.04)\">\n    <div style=\"font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px\">Zakres i jakość researchu</div>\n    <h2 style=\"margin:0 0 10px;font-size:18px;color:#0f172a;line-height:1.4\">Przeszukano źródła Sejmu i ELI w zadanym okresie</h2>\n    <p style=\"margin:0 0 8px;font-size:14px;color:#475569;line-height:1.7\">W oknie tygodniowym znaleziono ${scanStats.interpelacjeChecked} interpelacji, ${scanStats.zapytaniaChecked} zapytań poselskich, ${scanStats.drukiChecked} nowych lub zmienionych druków oraz ${scanStats.aktyPrawneChecked} opublikowanych aktów prawnych.</p>\n    <p style=\"margin:0;font-size:14px;color:#475569;line-height:1.7\">Dla ${scanStats.enriched} wstępnie trafnych pozycji pobrano dodatkowo treść interpelacji, odpowiedzi, uzasadnienia albo tekst aktu. Do maila trafiły tylko rekordy z mocnym, wyjaśnionym związkiem z nauką lub szkolnictwem wyższym.</p>\n  </div>`;\n\nconst emptyStateHtml = `\n  <div style=\"background:#ffffff;border:1px solid #dbe4f0;border-radius:14px;padding:22px;margin-bottom:18px;box-shadow:0 8px 24px rgba(15,23,42,.04)\">\n    <h2 style=\"margin:0 0 10px;font-size:18px;color:#0f172a;line-height:1.45\">W badanym tygodniu briefing nie wykazał nowych pozycji mieszczących się we właściwości Ministra Nauki i Szkolnictwa Wyższego</h2>\n    <p style=\"margin:0;font-size:14px;color:#475569;line-height:1.7\">Nie oznacza to braku aktywności Sejmu. Oznacza, że po sprawdzeniu metadanych i dostępnych treści żaden nowy rekord nie miał wystarczająco mocnego związku z zakresem MNiSW albo został już wcześniej wysłany bez późniejszej zmiany.</p>\n  </div>`;\n\nconst alertHtml = sourceErrors && sourceErrors.length\n  ? `\n    <div style=\"background:#fff7ed;border:1px solid #fdba74;border-radius:14px;padding:18px 20px;margin-bottom:18px\">\n      <div style=\"font-size:11px;font-weight:700;color:#c2410c;text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px\">Ostrzeżenie o kompletności</div>\n      <h2 style=\"margin:0 0 10px;font-size:18px;color:#9a3412;line-height:1.4\">Briefing został przygotowany częściowo</h2>\n      <p style=\"margin:0 0 10px;font-size:14px;color:#7c2d12;line-height:1.7\">Co najmniej jedno źródło nie odpowiedziało poprawnie. Mail wychodzi, żeby nie zostawiać Cię bez statusu tygodnia, ale wynik może być niepełny.</p>\n      <ul style=\"margin:0;padding-left:18px;color:#7c2d12;font-size:13px;line-height:1.7\">${sourceErrors.map(error => `<li><strong>${escapeHtml(error.label)}</strong>: ${escapeHtml(error.message)}</li>`).join('')}</ul>\n    </div>`\n  : '';\n\nconst interpelacjeHtml = renderSection('Interpelacje', 'Sejm', interpelacje, item => renderRow({\n  heading: item.title,\n  url: item.url,\n  metaParts: [item.eventDate || item.sentDate || item.receiptDate, item.eventType === 'answer-update' ? 'Nowa odpowiedź do wcześniejszej interpelacji' : 'Nowa interpelacja w badanym okresie', item.recipientsText ? `Do: ${item.recipientsText}` : '', item.hasReply ? 'Jest odpowiedź' : 'Bez odpowiedzi', item.researchQuality === 'full-text' ? 'Sprawdzono treść' : 'Tylko metadane'],\n  bodyHtml: renderEvidenceHtml(item),\n}));\n\nconst zapytaniaHtml = renderSection('Zapytania poselskie', 'Sejm', zapytania, item => renderRow({\n  heading: item.title,\n  url: item.url,\n  metaParts: [item.eventDate || item.sentDate || item.receiptDate, item.eventType === 'answer-update' ? 'Nowa odpowiedź do wcześniejszego zapytania' : 'Nowe zapytanie w badanym okresie', item.recipientsText ? `Do: ${item.recipientsText}` : '', item.hasReply ? 'Jest odpowiedź' : 'Bez odpowiedzi', item.researchQuality === 'full-text' ? 'Sprawdzono treść' : 'Tylko metadane'],\n  bodyHtml: renderEvidenceHtml(item),\n}));\n\nconst drukiHtml = renderSection('Druki sejmowe', 'Proces legislacyjny', druki, item => renderRow({\n  heading: `Druk nr ${item.number}: ${item.title}`,\n  url: item.url,\n  metaParts: [item.deliveryDate || (item.changeDate ? item.changeDate.slice(0, 10) : ''), item.documentType || '', item.researchQuality === 'full-text' ? 'Sprawdzono dokument' : 'Tylko metadane'],\n  bodyHtml: renderEvidenceHtml(item),\n  secondaryUrl: item.attachmentUrl,\n  secondaryLabel: 'Otwórz uzasadnienie / dokument',\n}));\n\nconst aktyHtml = renderSection('Akty prawne opublikowane w Dzienniku Ustaw', 'ELI', aktyPrawne, item => {\n  const legalMeta = [\n    item.promulgation ? `Ogłoszono: ${item.promulgation}` : '',\n    item.entryIntoForce ? `Wejście w życie: ${item.entryIntoForce}` : '',\n    item.status || '',\n  ];\n  const keywords = Array.isArray(item.keywords) && item.keywords.length\n    ? `<p style=\"margin:0 0 8px\"><strong>Słowa kluczowe ELI:</strong> ${escapeHtml(item.keywords.slice(0, 8).join(', '))}</p>`\n    : '';\n  return renderRow({\n    heading: `${item.displayAddress || item.eli}: ${item.title}`,\n    url: item.url,\n    metaParts: legalMeta,\n    bodyHtml: `${keywords}${renderEvidenceHtml(item)}`,\n  });\n});\n\nconst sectionsHtml = [interpelacjeHtml, zapytaniaHtml, drukiHtml, aktyHtml].filter(Boolean).join('');\nconst shouldRenderEmpty = briefingStatus === 'empty' || (briefingStatus === 'partial_error' && stats.total === 0);\nconst html = `<!DOCTYPE html><html lang=\"pl\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>*{box-sizing:border-box}body{margin:0;padding:20px;background:#f1f5f9;font-family:Arial,sans-serif}</style></head><body><div style=\"max-width:780px;margin:0 auto\"><div style=\"background:linear-gradient(135deg,#163760,#2563eb);color:#fff;border-radius:16px;padding:30px 28px 26px;margin-bottom:20px;box-shadow:0 18px 36px rgba(37,99,235,.20)\"><div style=\"font-size:11px;opacity:.72;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:8px\">Monitor Parlamentarny · MNiSW</div><h1 style=\"margin:0 0 10px;font-size:24px;font-weight:800;line-height:1.25\">Tygodniowy Briefing Parlamentarny</h1><div style=\"max-width:620px;opacity:.92;font-size:14px;line-height:1.7\">${escapeHtml(subtitle)}. Wyniki są oparte na oficjalnych danych Sejmu i ELI oraz — gdy API je udostępnia — na treści dokumentów źródłowych.</div>${statsCards}</div>${alertHtml}${scanSummaryHtml}${shouldRenderEmpty ? emptyStateHtml : ''}${sectionsHtml}<div style=\"margin-top:24px;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:18px 20px;text-align:center\"><div style=\"font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#1e3a5f;margin-bottom:6px\">Monitor Parlamentarny · MNiSW</div><div style=\"font-size:13px;color:#475569;line-height:1.6\">Made by Michał Reczek · <a href=\"mailto:michalreczek@gmail.com\" style=\"color:#1d4ed8;text-decoration:none\">michalreczek@gmail.com</a></div><div style=\"font-size:11px;color:#94a3b8;margin-top:8px\">Źródła: api.sejm.gov.pl/sejm · api.sejm.gov.pl/eli · ${escapeHtml(new Date().toLocaleString('pl-PL'))}</div></div></div></body></html>`;\n\nfunction evidenceText(item) {\n  return [\n    item.summary ? `Co wynika ze źródła: ${shorten(item.summary)}` : '',\n    item.replySummary ? `Najnowsza odpowiedź: ${shorten(item.replySummary)}` : '',\n    `Dlaczego w briefingu: ${item.decisionReason}`,\n    !item.summary && item.researchQuality === 'metadata' ? 'Uwaga: kwalifikacja opiera się na tytule i metadanych; API nie udostępniło czytelnej treści dokumentu.' : '',\n  ].filter(Boolean).join('\\n');\n}\n\nfunction sectionText(title, items, renderItem) {\n  if (!items || !items.length) return '';\n  return `${title}\\n${items.map(renderItem).join('\\n\\n')}`;\n}\n\nconst interpelacjeText = sectionText('Interpelacje', interpelacje, item => [item.title, `Link: ${item.url}`, renderMetaText([item.eventDate || item.sentDate || item.receiptDate, item.eventType === 'answer-update' ? 'Nowa odpowiedź do wcześniejszej interpelacji' : 'Nowa interpelacja w badanym okresie', item.recipientsText ? `Do: ${item.recipientsText}` : '', item.hasReply ? 'Jest odpowiedź' : 'Bez odpowiedzi']), evidenceText(item)].filter(Boolean).join('\\n'));\nconst zapytaniaText = sectionText('Zapytania poselskie', zapytania, item => [item.title, `Link: ${item.url}`, renderMetaText([item.eventDate || item.sentDate || item.receiptDate, item.eventType === 'answer-update' ? 'Nowa odpowiedź do wcześniejszego zapytania' : 'Nowe zapytanie w badanym okresie', item.recipientsText ? `Do: ${item.recipientsText}` : '', item.hasReply ? 'Jest odpowiedź' : 'Bez odpowiedzi']), evidenceText(item)].filter(Boolean).join('\\n'));\nconst drukiText = sectionText('Druki sejmowe', druki, item => [`Druk nr ${item.number}: ${item.title}`, `Link: ${item.url}`, item.attachmentUrl ? `Dokument: ${item.attachmentUrl}` : '', renderMetaText([item.deliveryDate || (item.changeDate ? item.changeDate.slice(0, 10) : ''), item.documentType || '']), evidenceText(item)].filter(Boolean).join('\\n'));\nconst aktyText = sectionText('Akty prawne opublikowane w Dzienniku Ustaw', aktyPrawne, item => [item.displayAddress || item.eli, item.title, `Link: ${item.url}`, renderMetaText([item.promulgation ? `Ogłoszono: ${item.promulgation}` : '', item.entryIntoForce ? `Wejście w życie: ${item.entryIntoForce}` : '', item.status || '']), Array.isArray(item.keywords) && item.keywords.length ? `Słowa kluczowe ELI: ${item.keywords.slice(0, 8).join(', ')}` : '', evidenceText(item)].filter(Boolean).join('\\n'));\nconst textSections = [interpelacjeText, zapytaniaText, drukiText, aktyText].filter(Boolean).join('\\n\\n---\\n\\n');\nconst errorsText = sourceErrors && sourceErrors.length ? `Ostrzeżenie: wynik częściowy\\n${sourceErrors.map(error => `- ${error.label}: ${error.message}`).join('\\n')}` : '';\nconst emptyText = 'Po sprawdzeniu metadanych i dostępnych treści nie znaleziono nowych, niewysłanych wcześniej pozycji z wystarczająco mocnym związkiem z zakresem MNiSW.';\n\nlet subject = `Briefing parlamentarny MNiSW | ${stats.total} nowych pozycji | ${dateTo}`;\nif (briefingStatus === 'empty') subject = `Briefing parlamentarny MNiSW | Status tygodniowy | ${dateTo}`;\nif (briefingStatus === 'partial_error') subject = `Briefing parlamentarny MNiSW | Wynik częściowy | ${dateTo}`;\n\nconst text = [\n  'Monitor Parlamentarny - MNiSW',\n  subtitle,\n  `Interpelacje: ${stats.interpelacje} | Zapytania: ${stats.zapytania} | Druki: ${stats.druki} | Akty prawne: ${stats.aktyPrawne}`,\n  `Zakres: ${scanStats.interpelacjeChecked} interpelacji, ${scanStats.zapytaniaChecked} zapytań, ${scanStats.drukiChecked} druków i ${scanStats.aktyPrawneChecked} aktów. Wzbogacono treścią: ${scanStats.enriched}.`,\n  errorsText,\n  shouldRenderEmpty ? emptyText : '',\n  textSections,\n  'Źródła: https://api.sejm.gov.pl/sejm | https://api.sejm.gov.pl/eli',\n  'Made by Michał Reczek | michalreczek@gmail.com',\n].filter(Boolean).join('\\n\\n');\n\nreturn [{ json: { subject, html, text, fromEmail: data.fromEmail, toEmail: data.toEmail } }];\n"
+      },
+      "id": "build-html",
+      "name": "Buduj HTML newsletter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ ({ from: $json.fromEmail, to: [$json.toEmail], subject: $json.subject, html: $json.html, text: $json.text }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "send-email",
+      "name": "Resend: wyślij email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1420,
+        250
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "8pIewAUkFsshffYZ",
+          "name": "Header Auth account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When clicking Test workflow": {
+      "main": [
+        [
+          {
+            "node": "Init: daty i stan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poniedziałek 07:00": {
+      "main": [
+        [
+          {
+            "node": "Init: daty i stan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init: daty i stan": {
+      "main": [
+        [
+          {
+            "node": "Research API: Sejm i ELI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research API: Sejm i ELI": {
+      "main": [
+        [
+          {
+            "node": "Normalize: Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize: Research": {
+      "main": [
+        [
+          {
+            "node": "Filtruj i scoruj (MNiSW)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtruj i scoruj (MNiSW)": {
+      "main": [
+        [
+          {
+            "node": "Buduj HTML newsletter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buduj HTML newsletter": {
+      "main": [
+        [
+          {
+            "node": "Resend: wyślij email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Warsaw",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    "sejm",
+    "mnisw",
+    "newsletter",
+    "legislacja"
+  ],
+  "meta": {
+    "instanceId": ""
+  },
+  "id": "9cDqVFh4KQBYw7ic",
+  "active": false
+}

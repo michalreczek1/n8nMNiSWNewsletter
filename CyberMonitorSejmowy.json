@@ -1,0 +1,418 @@
+{
+  "name": "Cyber-monitor Sejmowy - Newsletter Tygodniowy",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Test manualny",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        160,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Harmonogram - poniedzialek 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        160,
+        440
+      ],
+      "notes": "Uruchamia workflow co poniedzialek o 07:00."
+    },
+    {
+      "parameters": {
+        "jsCode": "const tz = 'Europe/Warsaw';\nconst daysLookback = 7;\nconst pageSize = 100;\nconst now = new Date();\nconst inWarsaw = new Intl.DateTimeFormat('sv-SE', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });\nconst formatDate = (date) => inWarsaw.format(date);\nconst dateTo = formatDate(now);\nconst dateFrom = formatDate(new Date(now.getTime() - daysLookback * 24 * 60 * 60 * 1000));\nconst getIsoWeek = (date) => {\n  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));\n  const dayNum = d.getUTCDay() || 7;\n  d.setUTCDate(d.getUTCDate() + 4 - dayNum);\n  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));\n  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);\n};\nconst ctx = {\n  dateFrom,\n  dateTo,\n  modifiedSince: `${dateFrom}T00:00`,\n  daysLookback,\n  weekNumber: getIsoWeek(now),\n  year: Number(dateTo.slice(0, 4)),\n  timezone: tz,\n  fromEmail: 'legislacja@send.familyos.pl',\n  toEmail: 'michalreczek@gmail.com'\n};\nconst base = 'https://api.sejm.gov.pl/sejm/term10';\nconst eliBase = 'https://api.sejm.gov.pl/eli/acts/search';\nconst items = [\n  { source: 'prints', kind: 'prints', url: `${base}/prints`, dateContext: ctx },\n  { source: 'proceedings-current', kind: 'proceedings', url: `${base}/proceedings/current`, dateContext: ctx },\n  { source: 'voting-days', kind: 'voting-days', url: `${base}/votings`, dateContext: ctx }\n];\n\n// API Sejmu zwraca najwyzej 100 rekordow. Pobieramy kolejne strony,\n// aby newsletter nie opieral sie tylko na pierwszych 100 interpelacjach.\nfor (let offset = 0; offset <= 1000; offset += pageSize) {\n  items.push({\n    source: `interpellations-${offset}`,\n    kind: 'interpellations',\n    url: `${base}/interpellations?modifiedSince=${encodeURIComponent(ctx.modifiedSince)}&sort_by=-lastModified&limit=${pageSize}&offset=${offset}`,\n    dateContext: ctx\n  });\n}\nfor (let offset = 0; offset <= 500; offset += pageSize) {\n  items.push({\n    source: `writtenQuestions-${offset}`,\n    kind: 'writtenQuestions',\n    url: `${base}/writtenQuestions?modifiedSince=${encodeURIComponent(ctx.modifiedSince)}&sort_by=-lastModified&limit=${pageSize}&offset=${offset}`,\n    dateContext: ctx\n  });\n}\n\n// ELI: wyszukujemy po dacie ogloszenia (promulgation), a nie po dacie\n// modyfikacji rekordu, ktora potrafi oznaczyc stary akt jako nowy.\nfor (const publisher of ['DU', 'MP']) {\n  for (let offset = 0; offset <= 200; offset += pageSize) {\n    const query = `publisher=${publisher}&pubDateFrom=${ctx.dateFrom}&pubDateTo=${ctx.dateTo}&limit=${pageSize}&offset=${offset}&sortBy=promulgation&sortDir=desc`;\n    items.push({ source: `eli-${publisher.toLowerCase()}-${offset}`, kind: 'eli', publisher, url: `${eliBase}?${query}`, dateContext: ctx });\n  }\n}\n\nfor (let i = 0; i <= daysLookback; i += 1) {\n  const date = formatDate(new Date(now.getTime() - i * 24 * 60 * 60 * 1000));\n  items.push({ source: `committees-${date}`, kind: 'committees', date, url: `${base}/committees/sittings/${date}`, dateContext: ctx });\n}\nreturn items.map((json) => ({ json }));\n"
+      },
+      "id": "init-source-urls",
+      "name": "Przygotuj URL-e zrodel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        350
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "fetch-sources",
+      "name": "Pobierz zrodla",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        690,
+        350
+      ],
+      "continueOnFail": true,
+      "notes": "Pobiera druki, interpelacje, zapytania, posiedzenia, dni glosowan, komisje oraz ELI."
+    },
+    {
+      "parameters": {
+        "jsCode": "const sourceItems = $items('Przygotuj URL-e zrodel').map((item) => item.json);\nconst responseItems = $items('Pobierz zrodla');\nconst ctx = sourceItems[0]?.dateContext;\nconst asItems = (payload) => {\n  if (Array.isArray(payload)) return payload;\n  if (payload && Array.isArray(payload.items)) return payload.items;\n  if (payload && Array.isArray(payload.data)) return payload.data;\n  return payload ? [payload] : [];\n};\nconst inRange = (value) => {\n  const d = String(value || '').slice(0, 10);\n  return /^\\d{4}-\\d{2}-\\d{2}$/.test(d) && d >= ctx.dateFrom && d <= ctx.dateTo;\n};\nlet votingDays = [];\nconst pairedIndex = (item, fallback) => {\n  const paired = item?.pairedItem;\n  if (Array.isArray(paired)) return paired[0]?.item ?? fallback;\n  return paired?.item ?? fallback;\n};\nfor (let i = 0; i < responseItems.length; i += 1) {\n  const meta = sourceItems[pairedIndex(responseItems[i], i)];\n  if (meta?.kind !== 'voting-days') continue;\n  const payload = responseItems[i]?.json;\n  if (payload?.error || payload?.statusCode >= 400) continue;\n  votingDays = asItems(payload).filter((row) => inRange(row.date));\n}\nconst proceedings = [...new Set(votingDays.map((row) => row.proceeding).filter(Boolean))].slice(0, 5);\nif (!proceedings.length) {\n  return [{ json: { source: 'no-voting-details', kind: 'noop', url: 'https://api.sejm.gov.pl/sejm/term10', dateContext: ctx } }];\n}\nreturn proceedings.map((proceeding) => ({\n  json: {\n    source: `votings-${proceeding}`,\n    kind: 'voting-details',\n    proceeding,\n    url: `https://api.sejm.gov.pl/sejm/term10/votings/${proceeding}`,\n    dateContext: ctx\n  }\n}));"
+      },
+      "id": "prepare-voting-urls",
+      "name": "Przygotuj URL-e glosowan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        350
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "fetch-voting-details",
+      "name": "Pobierz szczegoly glosowan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1230,
+        350
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const sourceItems = $items('Przygotuj URL-e zrodel').map((item) => item.json);\nconst baseResponses = $items('Pobierz zrodla');\nconst detailSourceItems = $items('Przygotuj URL-e glosowan').map((item) => item.json);\nconst detailResponses = $items('Pobierz szczegoly glosowan');\nconst dateContext = sourceItems[0]?.dateContext || detailSourceItems[0]?.dateContext;\nconst inRange = (value) => {\n  const d = String(value || '').slice(0, 10);\n  return /^\\d{4}-\\d{2}-\\d{2}$/.test(d) && d >= dateContext.dateFrom && d <= dateContext.dateTo;\n};\nconst stripHtml = (value) => String(value || '')\n  .replace(/<[^>]*>/g, ' ')\n  .replace(/&nbsp;/g, ' ')\n  .replace(/&oacute;/g, 'ó')\n  .replace(/&amp;/g, '&')\n  .replace(/&quot;/g, '\"')\n  .replace(/\\s+/g, ' ')\n  .trim();\nconst normalize = (value) => stripHtml(value)\n  .toLowerCase()\n  .normalize('NFD')\n  .replace(/[\\u0300-\\u036f]/g, '')\n  .replace(/ł/g, 'l')\n  .replace(/[^a-z0-9]+/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .trim();\nconst exactPatterns = new Set(['ksc', 'nis2', 'dora', 'csirt', 'cert', 'soc', 'rodo', 'gdpr', 'uodo', 'puodo', 'uke', 'ai', 'iot', 'eidas', 'e zdrowie', 'e zdrowia']);\nconst matchesPattern = (text, pattern) => exactPatterns.has(pattern) ? text.includes(` ${pattern} `) : text.includes(pattern);\nconst signalDefs = [\n  {\n    label: 'cyberbezpieczenstwo',\n    weight: 6,\n    reason: 'Pozycja bezposrednio odnosi sie do cyberbezpieczenstwa, KSC/NIS2, incydentow lub operacyjnej ochrony systemow.',\n    patterns: ['cyberbezpieczen', 'cyberatak', 'krajowy system cyberbezpieczenstwa', 'system cyberbezpieczenstwa', 'ksc', 'nis2', 'dora', 'csirt', 'cert', 'soc', 'incydent cyber', 'ransomware', 'malware', 'phishing', 'haker', 'infrastruktura krytyczna']\n  },\n  {\n    label: 'ochrona danych',\n    weight: 5,\n    reason: 'Pozycja dotyczy ochrony danych osobowych, prywatnosci, RODO/UODO albo odpowiedzialnosci za przetwarzanie danych.',\n    patterns: ['dane osobowe', 'ochrona danych', 'rodo', 'gdpr', 'uodo', 'puodo', 'prywatnosc', 'prywatnosci']\n  },\n  {\n    label: 'telekomunikacja i lacznosc',\n    weight: 5,\n    reason: 'Pozycja dotyczy infrastruktury telekomunikacyjnej, lacznosci, urzadzen nadawczych lub regulacji UKE, co ma znaczenie dla odpornosci komunikacji publicznej.',\n    patterns: ['telekomunikac', 'urzadzen telekomunikacyjnych', 'radiowych urzadzen nadawczych', 'nadawczo odbiorczych', 'lacznosc satelitarna', 'laczności satelitarnej', 'uke', 'widmo radiowe', 'czestotliwosci radiowych']\n  },\n  {\n    label: 'cyfryzacja administracji',\n    weight: 5,\n    reason: 'Pozycja dotyczy cyfryzacji uslug publicznych, e-administracji, podpisu elektronicznego, eIDAS, e-doreczen lub profilu zaufanego.',\n    patterns: ['transformacja cyfrowa', 'cyfryzacja uslug publicznych', 'cyfryzacja administracji', 'cyfrowe uslugi publiczne', 'informatyzacja administracji publicznej', 'e administracja', 'e uslug', 'usluga cyfrowa', 'mobywatel', 'e doreczen', 'edoreczen', 'eidas', 'podpis elektroniczny', 'profil zaufany', 'identyfikacja elektroniczna']\n  },\n  {\n    label: 'systemy informatyczne i rejestry',\n    weight: 5,\n    reason: 'Pozycja dotyczy systemow informatycznych, rejestrow publicznych, baz danych lub interoperacyjnosci uslug panstwa.',\n    patterns: ['teleinformatycz', 'system informatyczny', 'systemy informatyczne', 'system informacji', 'rejestr publiczny', 'rejestry publiczne', 'baza danych', 'bazy danych', 'interoperacyjnosc']\n  },\n  {\n    label: 'e-zdrowie',\n    weight: 5,\n    reason: 'Pozycja dotyczy cyfrowych procesow ochrony zdrowia lub danych medycznych, czyli obszaru o wysokich wymaganiach bezpieczenstwa informacji.',\n    patterns: ['cyfrowej ochrony zdrowia', 'cyfryzacji ochrony zdrowia', 'e zdrowie', 'e zdrowia', 'internetowe konto pacjenta', 'dane medyczne', 'dokumentacja medyczna']\n  },\n  {\n    label: 'AI i automatyzacja',\n    weight: 5,\n    reason: 'Pozycja dotyczy sztucznej inteligencji, AI Act, biometrii, deepfake albo automatyzacji decyzji publicznych.',\n    patterns: ['sztuczna inteligencja', 'sztucznej inteligencji', 'artificial intelligence', 'ai act', 'biometr', 'deepfake', 'automatyzacja decyzji', 'automatycznego podejmowania decyzji']\n  },\n  {\n    label: 'aktywa cyfrowe',\n    weight: 5,\n    reason: 'Pozycja dotyczy aktywow cyfrowych, dostepu do kont lub statusu prawnego danych i zasobow cyfrowych.',\n    patterns: ['aktywa cyfrowe', 'aktywow cyfrowych', 'aktywów cyfrowych', 'dziedziczenia aktywow cyfrowych', 'dziedziczenie aktywow cyfrowych']\n  },\n  {\n    label: 'platformy i dezinformacja',\n    weight: 4,\n    reason: 'Pozycja dotyczy platform internetowych, mediow spolecznosciowych lub dezinformacji, czyli obszaru bezpieczenstwa informacji publicznej.',\n    patterns: ['platforma internetowa', 'platformy internetowe', 'media spolecznosciowe', 'dezinformac']\n  },\n  {\n    label: 'komisja cyfryzacji',\n    weight: 4,\n    reason: 'Pozycja pochodzi z Komisji Cyfryzacji, Innowacyjnosci i Nowoczesnych Technologii, wiec moze dotyczyc regulacji cyfrowych lub technologicznych.',\n    patterns: ['komisja cyfryzacji innowacyjnosci i nowoczesnych technologii', 'cyfryzacji innowacyjnosci i nowoczesnych technologii']\n  }\n].map((signal) => ({ ...signal, normalized: signal.patterns.map(normalize).filter(Boolean) }));\nconst relevance = (...parts) => {\n  const text = ` ${normalize(parts.filter(Boolean).join(' '))} `;\n  const hits = [];\n  for (const signal of signalDefs) {\n    if (signal.normalized.some((pattern) => matchesPattern(text, pattern))) hits.push(signal);\n  }\n  const score = hits.reduce((sum, hit) => sum + hit.weight, 0);\n  if (!hits.length) return null;\n  return {\n    score,\n    labels: hits.map((hit) => hit.label),\n    reason: hits.map((hit) => hit.reason).filter((reason, index, arr) => arr.indexOf(reason) === index).join(' ')\n  };\n};\nconst relevantRows = (items, partsFn, minScore = 4) => items\n  .map((item) => ({ item, rel: relevance(...partsFn(item)) }))\n  .filter(({ rel }) => rel && rel.score >= minScore);\nconst asItems = (payload) => {\n  if (Array.isArray(payload)) return payload;\n  if (payload && Array.isArray(payload.items)) return payload.items;\n  if (payload && Array.isArray(payload.data)) return payload.data;\n  return payload ? [payload] : [];\n};\nconst firstLink = (links, rel) => {\n  if (!Array.isArray(links)) return '';\n  const hit = links.find((link) => link.rel === rel) || links[0];\n  return hit?.href || '';\n};\nconst uniqBy = (items, keyFn) => {\n  const seen = new Set();\n  return items.filter((item) => {\n    const key = keyFn(item);\n    if (seen.has(key)) return false;\n    seen.add(key);\n    return true;\n  });\n};\nconst pairedIndex = (item, fallback) => {\n  const paired = item?.pairedItem;\n  if (Array.isArray(paired)) return paired[0]?.item ?? fallback;\n  return paired?.item ?? fallback;\n};\nconst payloads = { prints: [], interpellations: [], writtenQuestions: [], proceedings: [], votingDays: [], committees: [], eli: [], votingDetails: [] };\nconst errors = [];\nfor (let i = 0; i < baseResponses.length; i += 1) {\n  const meta = sourceItems[pairedIndex(baseResponses[i], i)] || {};\n  const payload = baseResponses[i]?.json;\n  if (!payload || payload.error || payload.statusCode >= 400) {\n    errors.push({ source: meta.source || `base-${i}`, url: meta.url, error: payload?.message || payload?.error || `HTTP ${payload?.statusCode || 'unknown'}` });\n    continue;\n  }\n  if (meta.kind === 'prints') payloads.prints.push(...asItems(payload));\n  if (meta.kind === 'interpellations') payloads.interpellations.push(...asItems(payload));\n  if (meta.kind === 'writtenQuestions') payloads.writtenQuestions.push(...asItems(payload));\n  if (meta.kind === 'proceedings') payloads.proceedings.push(...asItems(payload));\n  if (meta.kind === 'voting-days') payloads.votingDays.push(...asItems(payload));\n  if (meta.kind === 'committees') payloads.committees.push(...asItems(payload));\n  if (meta.kind === 'eli') payloads.eli.push(...asItems(payload));\n}\nfor (let i = 0; i < detailResponses.length; i += 1) {\n  const meta = detailSourceItems[pairedIndex(detailResponses[i], i)] || {};\n  const payload = detailResponses[i]?.json;\n  if (meta.kind === 'noop') continue;\n  if (!payload || payload.error || payload.statusCode >= 400) {\n    errors.push({ source: meta.source || `detail-${i}`, url: meta.url, error: payload?.message || payload?.error || `HTTP ${payload?.statusCode || 'unknown'}` });\n    continue;\n  }\n  payloads.votingDetails.push(...asItems(payload));\n}\nconst recentChange = (item) => inRange(item.lastModified) || inRange(item.receiptDate) || inRange(item.sentDate) || (Array.isArray(item.replies) && item.replies.some((reply) => inRange(reply.lastModified) || inRange(reply.receiptDate)));\nconst countRecentReplies = (item) => Array.isArray(item.replies) ? item.replies.filter((reply) => inRange(reply.lastModified) || inRange(reply.receiptDate)).length : 0;\nconst questionEventDate = (item) => {\n  const replyDates = Array.isArray(item.replies)\n    ? item.replies.flatMap((reply) => [reply.lastModified, reply.receiptDate]).filter(inRange)\n    : [];\n  return [...replyDates, item.lastModified, item.receiptDate, item.sentDate].filter(inRange).sort().at(-1) || '';\n};\nconst uniquePrints = uniqBy(payloads.prints, (p) => String(p.number || p.num || `${p.title}-${p.deliveryDate}`));\nconst uniqueInterpellations = uniqBy(payloads.interpellations, (i) => String(i.num || `${i.title}-${i.sentDate}`));\nconst uniqueWrittenQuestions = uniqBy(payloads.writtenQuestions, (q) => String(q.num || `${q.title}-${q.sentDate}`));\nconst uniqueActs = uniqBy(payloads.eli, (act) => String(act.ELI || act.displayAddress || `${act.title}-${act.promulgation}`));\nconst filteredPrints = relevantRows(uniquePrints.filter((p) => inRange(p.deliveryDate || p.documentDate)), (p) => [p.title, p.description, p.documentType])\n  .sort((a, b) => String(b.item.deliveryDate || b.item.documentDate || '').localeCompare(String(a.item.deliveryDate || a.item.documentDate || '')))\n  .slice(0, 16)\n  .map(({ item: p, rel }) => ({ type: 'Druk sejmowy', title: stripHtml(p.title) || 'Brak tytulu', number: p.number || p.num || '', date: String(p.deliveryDate || p.documentDate || '').slice(0, 10), reason: rel.reason, signals: rel.labels, meta: [p.documentType || p.type || '', p.number ? `druk ${p.number}` : ''].filter(Boolean).join(' | '), url: p.number ? `https://www.sejm.gov.pl/Sejm10.nsf/druk.xsp?nr=${encodeURIComponent(p.number)}` : 'https://www.sejm.gov.pl/Sejm10.nsf/druki.xsp' }));\n// Adresat (np. Minister Cyfryzacji) nie jest sam w sobie dowodem trafnosci.\n// Interpelacje i zapytania musza miec sygnal tematyczny w tytule.\nconst filteredInterpellations = relevantRows(uniqueInterpellations.filter(recentChange), (i) => [i.title])\n  .sort((a, b) => questionEventDate(b.item).localeCompare(questionEventDate(a.item)))\n  .slice(0, 14)\n  .map(({ item: i, rel }) => ({ type: 'Interpelacja', title: stripHtml(i.title) || 'Brak tytulu', number: i.num || '', date: questionEventDate(i), reason: rel.reason, signals: rel.labels, meta: [`nr ${i.num || '?'}`, countRecentReplies(i) ? `${countRecentReplies(i)} nowe odpowiedzi/zmiany` : '', Array.isArray(i.to) ? i.to.join(', ') : ''].filter(Boolean).join(' | '), url: firstLink(i.links, 'web-description') }));\nconst filteredWrittenQuestions = relevantRows(uniqueWrittenQuestions.filter(recentChange), (q) => [q.title])\n  .sort((a, b) => questionEventDate(b.item).localeCompare(questionEventDate(a.item)))\n  .slice(0, 14)\n  .map(({ item: q, rel }) => ({ type: 'Zapytanie poselskie', title: stripHtml(q.title) || 'Brak tytulu', number: q.num || '', date: questionEventDate(q), reason: rel.reason, signals: rel.labels, meta: [`nr ${q.num || '?'}`, countRecentReplies(q) ? `${countRecentReplies(q)} nowe odpowiedzi/zmiany` : '', Array.isArray(q.to) ? q.to.join(', ') : ''].filter(Boolean).join(' | '), url: firstLink(q.links, 'web-description') }));\nconst filteredActs = relevantRows(uniqueActs.filter((act) => inRange(act.promulgation)), (act) => [act.title, act.type, Array.isArray(act.keywords) ? act.keywords.join(' ') : act.keywords, act.subject])\n  .sort((a, b) => String(b.item.promulgation || '').localeCompare(String(a.item.promulgation || '')))\n  .slice(0, 14)\n  .map(({ item: act, rel }) => ({ type: act.publisher === 'MP' ? 'Monitor Polski' : 'Dziennik Ustaw', title: stripHtml(act.title) || 'Brak tytulu', number: act.displayAddress || act.ELI || '', date: String(act.promulgation || '').slice(0, 10), reason: rel.reason, signals: rel.labels, meta: [act.displayAddress || act.ELI, act.type, act.status].filter(Boolean).join(' | '), url: act.ELI ? `https://api.sejm.gov.pl/eli/acts/${act.ELI}/text.pdf` : 'https://api.sejm.gov.pl/eli' }));\nconst filteredCommittees = relevantRows(payloads.committees.filter((s) => inRange(s.date || s.startDateTime)), (s) => [s.code === 'CNT' ? 'Komisja Cyfryzacji Innowacyjnosci i Nowoczesnych Technologii' : '', s.agenda, s.video?.map((v) => `${v.title} ${v.description}`).join(' ')])\n  .sort((a, b) => String(b.item.startDateTime || b.item.date || '').localeCompare(String(a.item.startDateTime || a.item.date || '')))\n  .slice(0, 14)\n  .map(({ item: s, rel }) => ({ type: s.video?.[0]?.type || 'Komisja/podkomisja', title: stripHtml(s.video?.[0]?.title || s.code || `Posiedzenie ${s.num || ''}`), number: [s.code, s.num ? `nr ${s.num}` : ''].filter(Boolean).join(' '), date: String(s.startDateTime || s.date || '').slice(0, 10), reason: rel.reason, signals: rel.labels, meta: [s.room, s.status, s.remote ? 'zdalne' : 'stacjonarne'].filter(Boolean).join(' | '), body: stripHtml(s.agenda || s.video?.[0]?.description || '').slice(0, 900), url: s.video?.[0]?.playerLink || 'https://www.sejm.gov.pl/Sejm10.nsf/agent.xsp?symbol=KOMISJE_STALE' }));\nconst filteredVotings = relevantRows(payloads.votingDetails.filter((v) => inRange(v.date)), (v) => [v.topic, v.title])\n  .sort((a, b) => String(b.item.date || '').localeCompare(String(a.item.date || '')))\n  .slice(0, 12)\n  .map(({ item: v, rel }) => ({ type: 'Glosowanie', title: stripHtml(v.topic || v.title || 'Glosowanie'), number: v.votingNumber ? `nr ${v.votingNumber}` : '', date: String(v.date || '').slice(0, 10), reason: rel.reason, signals: rel.labels, meta: [`posiedzenie ${v.sitting || '?'}`, `za ${v.yes ?? 0}`, `przeciw ${v.no ?? 0}`, `wstrz. ${v.abstain ?? 0}`].join(' | '), url: Array.isArray(v.links) ? firstLink(v.links, 'pdf') : '' }));\nconst recentProceedings = relevantRows(payloads.proceedings.filter((p) => Array.isArray(p.dates) ? p.dates.some(inRange) : inRange(p.date)), (p) => [p.title, p.agenda])\n  .sort((a, b) => String((b.item.dates || [b.item.date || ''])[0]).localeCompare(String((a.item.dates || [a.item.date || ''])[0])))\n  .slice(0, 8)\n  .map(({ item: p, rel }) => ({ type: 'Posiedzenie Sejmu', title: stripHtml(p.title) || `Posiedzenie nr ${p.number || p.num || ''}`, number: p.number || p.num || '', date: Array.isArray(p.dates) ? p.dates.filter(inRange).join(', ') : String(p.date || '').slice(0, 10), reason: rel.reason, signals: rel.labels, meta: Array.isArray(p.dates) ? p.dates.join(', ') : String(p.date || '').slice(0, 10), body: stripHtml(p.agenda || '').slice(0, 900) }));\nconst sections = {\n  prints: uniqBy(filteredPrints, (x) => `print-${x.number}-${x.title}`),\n  acts: uniqBy(filteredActs, (x) => `act-${x.number}-${x.title}`),\n  interpellations: uniqBy(filteredInterpellations, (x) => `int-${x.number}-${x.title}`),\n  writtenQuestions: uniqBy(filteredWrittenQuestions, (x) => `zap-${x.number}-${x.title}`),\n  committees: uniqBy(filteredCommittees, (x) => `committee-${x.number}-${x.date}-${x.title}`),\n  votings: uniqBy(filteredVotings, (x) => `vote-${x.number}-${x.date}-${x.title}`),\n  proceedings: recentProceedings\n};\nreturn [{\n  json: {\n    dateContext,\n    sections,\n    totalFound: Object.values(sections).flat().length,\n    stats: {\n      rawPrints: payloads.prints.length,\n      rawInterpellations: payloads.interpellations.length,\n      rawWrittenQuestions: payloads.writtenQuestions.length,\n      rawProceedings: payloads.proceedings.length,\n      rawVotingDays: payloads.votingDays.length,\n      rawVotingDetails: payloads.votingDetails.length,\n      rawCommittees: payloads.committees.length,\n      rawEliActs: payloads.eli.length,\n      prints: sections.prints.length,\n      acts: sections.acts.length,\n      interpellations: sections.interpellations.length,\n      writtenQuestions: sections.writtenQuestions.length,\n      committees: sections.committees.length,\n      votings: sections.votings.length,\n      proceedings: sections.proceedings.length\n    },\n    errors\n  }\n}];\n"
+      },
+      "id": "aggregate-filter",
+      "name": "Agreguj i filtruj dane",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        350
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.item.json;\nconst { dateContext, sections, stats, errors, totalFound } = data;\nconst compact = {\n  zakres: `${dateContext.dateFrom} - ${dateContext.dateTo}`,\n  statystyki: stats,\n  druki: sections.prints.slice(0, 8).map(({ title, date, meta, reason, signals }) => ({ title, date, meta, reason, signals })),\n  akty_prawne: sections.acts.slice(0, 8).map(({ title, date, meta, reason, signals }) => ({ title, date, meta, reason, signals })),\n  interpelacje: sections.interpellations.slice(0, 8).map(({ title, date, meta, reason, signals }) => ({ title, date, meta, reason, signals })),\n  zapytania: sections.writtenQuestions.slice(0, 8).map(({ title, date, meta, reason, signals }) => ({ title, date, meta, reason, signals })),\n  komisje: sections.committees.slice(0, 8).map(({ title, date, meta, body }) => ({ title, date, meta, agenda: body })),\n  glosowania: sections.votings.slice(0, 8).map(({ title, date, meta, reason, signals }) => ({ title, date, meta, reason, signals })),\n  bledy_zrodel: errors\n};\n\nconst systemPrompt = `Jestes analitykiem cyberbezpieczenstwa i legislacji. Pisz po polsku, formalnie, krotko i rzeczowo. Masz przygotowac komentarz do newslettera na podstawie danych juz odfiltrowanych z oficjalnych API. Kazda pozycja ma pole reason, ktore wyjasnia zwiazek z cyberbezpieczenstwem lub cyfryzacja. Nie dodawaj faktow spoza danych. Jesli liczba trafien jest mala, powiedz to wprost. Zwracaj tylko fragment HTML: kilka akapitow i ewentualnie krotkie <strong>, bez <html>, <head>, <body>, bez tabel.`;\nconst userPrompt = `Na podstawie danych ponizej napisz sekcje \"Komentarz analityczny\" dla newslettera Cyber-monitor Sejmowy za okres ${dateContext.dateFrom} - ${dateContext.dateTo}.\n\nWymagania:\n- zacznij od <h2>Komentarz analityczny</h2>;\n- 2-4 akapity <p>;\n- wskaz najwazniejsze obszary ryzyka/uwagi dla administracji publicznej;\n- nie uzasadniaj pozycji ogolnikowo; korzystaj z pol reason/signals;\n- jezeli totalFound=${totalFound}, uwzglednij skale znalezisk;\n- jezeli sa bledy zrodel, zasygnalizuj ograniczenie danych bez technicznego tonu.\n\nDane JSON:\n${JSON.stringify(compact, null, 2)}`;\n\nreturn [{ json: { ...data, systemPrompt, userPrompt } }];"
+      },
+      "id": "prepare-prompt",
+      "name": "Przygotuj prompt dla Groq",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1770,
+        350
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.userPrompt }}",
+        "hasOutputParser": false,
+        "messages": {
+          "messageValues": [
+            {
+              "type": "SystemMessagePromptTemplate",
+              "messageType": "text",
+              "message": "={{ $json.systemPrompt }}"
+            }
+          ]
+        }
+      },
+      "id": "groq-chain",
+      "name": "Groq - komentarz analityczny",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        2040,
+        350
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {
+          "maxTokensToSample": 1600,
+          "temperature": 0.2
+        }
+      },
+      "id": "groq-model",
+      "name": "Groq Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        2040,
+        590
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "2S2vBMZiDiMvOYox",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const source = $('Agreguj i filtruj dane').item.json;\nconst dateCtx = source.dateContext;\nconst sections = source.sections;\nconst stats = source.stats;\nconst errors = source.errors || [];\nconst llm = $input.item.json;\nconst escapeHtml = (value) => String(value ?? '')\n  .replace(/&/g, '&amp;')\n  .replace(/</g, '&lt;')\n  .replace(/>/g, '&gt;')\n  .replace(/\"/g, '&quot;')\n  .replace(/'/g, '&#39;');\nconst cleanFragment = (value) => {\n  const raw = String(value || '').trim();\n  if (!raw || llm.error) {\n    return '<h2>Komentarz analityczny</h2><p>Nie udalo sie wygenerowac komentarza LLM, ale ponizsze sekcje zawieraja deterministycznie zebrane wyniki z oficjalnych zrodel.</p>';\n  }\n  return raw\n    .replace(/```html/gi, '')\n    .replace(/```/g, '')\n    .replace(/<\\/?(?:html|head|body)[^>]*>/gi, '')\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, '')\n    .trim();\n};\nconst itemCard = (item) => {\n  const title = escapeHtml(item.title || 'Brak tytulu');\n  const reason = item.reason ? `<div class=\"item-body reason\"><strong>Dlaczego w monitoringu:</strong> ${escapeHtml(item.reason)}</div>` : '';\n  const body = item.body ? `<div class=\"item-body\"><strong>Opis zrodla:</strong> ${escapeHtml(item.body)}</div>` : '';\n  const url = item.url ? `<a href=\"${escapeHtml(item.url)}\">zrodlo</a>` : '';\n  const meta = [item.date, item.meta, url].filter(Boolean).join(' | ');\n  return `<div class=\"item-card\">\n    <div class=\"item-title\">${title}</div>\n    ${reason}\n    ${body}\n    <div class=\"item-meta\">${escapeHtml(item.type || '')}${meta ? ' | ' + meta : ''}</div>\n  </div>`;\n};\nconst sectionHtml = (heading, items, emptyText) => {\n  const content = items && items.length ? items.map(itemCard).join('\\n') : `<p class=\"empty-state\">${escapeHtml(emptyText || 'W tym tygodniu nie odnotowano trafien w tej kategorii.')}</p>`;\n  return `<h2>${heading}</h2>\\n${content}`;\n};\nconst statChip = (label, value) => `<div class=\"stat-chip\"><span>${escapeHtml(label)}</span><strong>${Number(value || 0)}</strong></div>`;\nconst warning = errors.length ? `<div class=\"notice\"><strong>Uwaga:</strong> ${errors.length} zrodel zwrocilo blad lub timeout. Newsletter zawiera dane z pozostalych zrodel, a szczegoly sa w execution logu n8n.</div>` : '';\nconst analysis = cleanFragment(llm.text || llm.output || llm.response || '');\nconst subject = `Cyber-monitor Sejmowy | Tydzien ${dateCtx.weekNumber}/${dateCtx.year} (${dateCtx.dateFrom} - ${dateCtx.dateTo})`;\nconst total = Object.values(sections).flat().length;\nconst htmlContent = `<!DOCTYPE html>\n<html lang=\"pl\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>${escapeHtml(subject)}</title>\n  <style>\n    body { margin: 0; padding: 0; background: #eef2f6; color: #17202a; font-family: Arial, Helvetica, sans-serif; line-height: 1.55; }\n    .preheader { display: none; visibility: hidden; opacity: 0; color: transparent; height: 0; width: 0; overflow: hidden; }\n    .wrapper { max-width: 760px; margin: 0 auto; background: #ffffff; }\n    .header { background: #12263a; color: #ffffff; padding: 34px 38px 28px 38px; }\n    .kicker { color: #9fb3c8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }\n    .header h1 { margin: 0; font-size: 25px; letter-spacing: 0; font-weight: 700; }\n    .header p { margin: 8px 0 0 0; color: #d9e2ec; font-size: 14px; }\n    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 18px 38px; background: #f7fafc; border-bottom: 1px solid #d9e2ec; }\n    .stat-chip { border: 1px solid #d9e2ec; border-radius: 8px; padding: 10px; background: #ffffff; }\n    .stat-chip span { display: block; color: #52606d; font-size: 11px; }\n    .stat-chip strong { display: block; color: #12263a; font-size: 20px; margin-top: 2px; }\n    .content { padding: 30px 38px 38px 38px; }\n    h2 { margin: 30px 0 14px 0; padding-bottom: 9px; border-bottom: 2px solid #e4e7eb; color: #102a43; font-size: 18px; letter-spacing: 0; }\n    h2:first-child { margin-top: 0; }\n    p { font-size: 14px; color: #334e68; margin: 0 0 14px 0; }\n    .notice { border-left: 4px solid #d64545; background: #fff5f5; padding: 12px 14px; color: #7f1d1d; font-size: 13px; margin: 18px 0; }\n    .item-card { background: #ffffff; border: 1px solid #d9e2ec; border-left: 4px solid #2f80ed; border-radius: 8px; padding: 15px 16px; margin: 0 0 12px 0; }\n    .item-title { color: #102a43; font-size: 14px; font-weight: 700; line-height: 1.45; }\n    .item-body { margin-top: 8px; color: #334e68; font-size: 13px; }\n    .item-body.reason { background: #f7fafc; border: 1px solid #d9e2ec; border-radius: 6px; padding: 9px 10px; }\n    .item-meta { border-top: 1px dashed #bcccdc; margin-top: 10px; padding-top: 8px; color: #627d98; font-size: 12px; }\n    .item-meta a { color: #1261a0; text-decoration: none; }\n    .empty-state { background: #f7fafc; border: 1px dashed #bcccdc; border-radius: 8px; padding: 14px; color: #627d98; font-style: italic; }\n    .footer { padding: 22px 38px; background: #f7fafc; border-top: 1px solid #d9e2ec; color: #52606d; font-size: 12px; }\n    .footer a { color: #1261a0; }\n    @media only screen and (max-width: 640px) {\n      .header, .content, .footer { padding-left: 20px; padding-right: 20px; }\n      .stats { grid-template-columns: repeat(2, 1fr); padding-left: 20px; padding-right: 20px; }\n    }\n  </style>\n</head>\n<body>\n  <span class=\"preheader\">${total} trafien legislacyjnych z obszaru cyberbezpieczenstwa i cyfryzacji.</span>\n  <div class=\"wrapper\">\n    <div class=\"header\">\n      <div class=\"kicker\">Cyberbezpieczenstwo | Cyfryzacja | Sejm RP</div>\n      <h1>Cyber-monitor Sejmowy</h1>\n      <p>Tygodniowy monitoring legislacyjny: ${escapeHtml(dateCtx.dateFrom)} - ${escapeHtml(dateCtx.dateTo)} | tydzien ${escapeHtml(dateCtx.weekNumber)}/${escapeHtml(dateCtx.year)}</p>\n    </div>\n    <div class=\"stats\">\n      ${statChip('Wszystkie trafienia', total)}\n      ${statChip('Druki i akty', (sections.prints?.length || 0) + (sections.acts?.length || 0))}\n      ${statChip('Interpelacje i zapytania', (sections.interpellations?.length || 0) + (sections.writtenQuestions?.length || 0))}\n      ${statChip('Komisje i glosowania', (sections.committees?.length || 0) + (sections.votings?.length || 0))}\n    </div>\n    <div class=\"content\">\n      ${warning}\n      ${analysis}\n      ${sectionHtml('Druki sejmowe', sections.prints, 'Brak nowych drukow sejmowych z jasnym zwiazkiem z cyberbezpieczenstwem lub cyfryzacja.')}\n      ${sectionHtml('Akty prawne: Dz.U. i M.P.', sections.acts, 'Brak nowych aktow prawnych w ELI z jasnym zwiazkiem z cyberbezpieczenstwem lub cyfryzacja.')}\n      ${sectionHtml('Interpelacje', sections.interpellations, 'Brak interpelacji z ostatnimi zmianami i jasnym zwiazkiem z cyberbezpieczenstwem lub cyfryzacja.')}\n      ${sectionHtml('Zapytania poselskie', sections.writtenQuestions, 'Brak zapytan poselskich z ostatnimi zmianami i jasnym zwiazkiem z cyberbezpieczenstwem lub cyfryzacja.')}\n      ${sectionHtml('Komisje i podkomisje', sections.committees, 'Brak posiedzen komisji z agendami pasujacymi do profilu cyber/cyfryzacja.')}\n      ${sectionHtml('Glosowania', sections.votings, 'Brak glosowan pasujacych do profilu cyber/cyfryzacja.')}\n      ${sectionHtml('Posiedzenia Sejmu', sections.proceedings, 'Brak posiedzen Sejmu w monitorowanym zakresie dat.')}\n    </div>\n    <div class=\"footer\">\n      Zrodla: <a href=\"https://api.sejm.gov.pl\">api.sejm.gov.pl</a>, API ELI Sejmu RP. Surowe odpowiedzi sa filtrowane w n8n przed wysylka, aby ograniczyc pominiecia i obciazenie instancji Proxmox. Newsletter ma charakter informacyjny i nie jest opinia prawna.<br>\n      Diagnostyka zrodel: pobrano m.in. druki ${escapeHtml(stats.rawPrints)}, interpelacje ${escapeHtml(stats.rawInterpellations)}, zapytania ${escapeHtml(stats.rawWrittenQuestions)}, akty ELI ${escapeHtml(stats.rawEliActs)}, posiedzenia komisji ${escapeHtml(stats.rawCommittees)}, szczegoly glosowan ${escapeHtml(stats.rawVotingDetails)}.\n    </div>\n  </div>\n</body>\n</html>`;\nconst textContent = htmlContent.replace(/<style[\\s\\S]*?<\\/style>/gi, ' ').replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();\n\nreturn [{\n  json: {\n    fromEmail: dateCtx.fromEmail,\n    toEmail: dateCtx.toEmail,\n    subject,\n    htmlContent,\n    textContent,\n    totalFound: total,\n    stats,\n    sourceErrors: errors\n  }\n}];"
+      },
+      "id": "build-email",
+      "name": "Zbuduj premium email HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2360,
+        350
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const emailData = $input.item.json;\nconst recipients = [\n  { email: 'michalreczek@gmail.com', name: 'Michal Reczek' }\n];\nreturn recipients.map((recipient) => ({\n  json: {\n    ...emailData,\n    recipientEmail: recipient.email,\n    recipientName: recipient.name\n  }\n}));"
+      },
+      "id": "recipients",
+      "name": "Lista odbiorcow",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2630,
+        350
+      ],
+      "notes": "Wysylka ustawiona na michalreczek@gmail.com."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({ from: $json.fromEmail, to: [$json.recipientEmail], subject: $json.subject, html: $json.htmlContent, text: $json.textContent }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "send-resend",
+      "name": "Resend - wyslij email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2900,
+        350
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "8pIewAUkFsshffYZ",
+          "name": "Header Auth account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.all();\nconst sent = results.filter((item) => item.json.id).length;\nconst failed = results.length - sent;\nreturn [{\n  json: {\n    summary: `Wyslano: ${sent}; bledy: ${failed}`,\n    sent,\n    failed,\n    timestamp: new Date().toISOString(),\n    results: results.map((item) => ({\n      id: item.json.id || null,\n      status: item.json.id ? 'sent' : 'error',\n      message: item.json.message || item.json.error || null\n    }))\n  }\n}];"
+      },
+      "id": "log-summary",
+      "name": "Log podsumowania",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3170,
+        350
+      ]
+    }
+  ],
+  "connections": {
+    "Test manualny": {
+      "main": [
+        [
+          {
+            "node": "Przygotuj URL-e zrodel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Harmonogram - poniedzialek 07:00": {
+      "main": [
+        [
+          {
+            "node": "Przygotuj URL-e zrodel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Przygotuj URL-e zrodel": {
+      "main": [
+        [
+          {
+            "node": "Pobierz zrodla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pobierz zrodla": {
+      "main": [
+        [
+          {
+            "node": "Przygotuj URL-e glosowan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Przygotuj URL-e glosowan": {
+      "main": [
+        [
+          {
+            "node": "Pobierz szczegoly glosowan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pobierz szczegoly glosowan": {
+      "main": [
+        [
+          {
+            "node": "Agreguj i filtruj dane",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agreguj i filtruj dane": {
+      "main": [
+        [
+          {
+            "node": "Przygotuj prompt dla Groq",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Przygotuj prompt dla Groq": {
+      "main": [
+        [
+          {
+            "node": "Groq - komentarz analityczny",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq - komentarz analityczny": {
+      "main": [
+        [
+          {
+            "node": "Zbuduj premium email HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Groq - komentarz analityczny",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zbuduj premium email HTML": {
+      "main": [
+        [
+          {
+            "node": "Lista odbiorcow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lista odbiorcow": {
+      "main": [
+        [
+          {
+            "node": "Resend - wyslij email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resend - wyslij email": {
+      "main": [
+        [
+          {
+            "node": "Log podsumowania",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": {
+    "node:Harmonogram - poniedzialek 07:00": {
+      "recurrenceRules": []
+    }
+  },
+  "tags": [
+    "sejm",
+    "cyberbezpieczenstwo",
+    "newsletter"
+  ],
+  "meta": {
+    "instanceId": "familyos-n8n-proxmox",
+    "updatedFor": "n8n 2.15.0 on Proxmox CT 105",
+    "optimizedAt": "2026-04-21",
+    "fetchMode": "http-request-nodes"
+  },
+  "id": "cmSjm260419t3iA",
+  "active": false
+}

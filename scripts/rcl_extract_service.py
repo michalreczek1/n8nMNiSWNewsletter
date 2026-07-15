@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from rcl_extract_project import extract_project, fetch_bytes
+from sejm_research import research_legal_sources
 
 
 HOST = os.getenv("RCL_HELPER_HOST", "127.0.0.1")
@@ -48,6 +49,30 @@ class Handler(BaseHTTPRequestHandler):
                 html = data.decode("utf-8", errors="ignore")
 
             self.respond(200, {"html": html, "finalUrl": final_url})
+            return
+
+        if parsed.path == "/sejm-research":
+            params = parse_qs(parsed.query or "")
+            date_from = (params.get("dateFrom") or [""])[0].strip()
+            date_to = (params.get("dateTo") or [""])[0].strip()
+            scope = (params.get("scope") or ["mnisw"])[0].strip() or "mnisw"
+            term = (params.get("term") or ["10"])[0].strip() or "10"
+            max_enrich = (params.get("maxEnrich") or ["20"])[0].strip() or "20"
+            try:
+                payload = research_legal_sources(
+                    date_from=date_from,
+                    date_to=date_to,
+                    scope=scope,
+                    term=int(term),
+                    max_enrich=int(max_enrich),
+                )
+            except (TypeError, ValueError) as exc:
+                self.respond(400, {"error": True, "message": str(exc)})
+                return
+            except Exception as exc:  # pragma: no cover - surfaced in response
+                self.respond(502, {"error": True, "message": f"Sejm research failed: {exc}"})
+                return
+            self.respond(200, payload)
             return
 
         if parsed.path != "/extract":

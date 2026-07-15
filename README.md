@@ -4,6 +4,7 @@ Newsletter workflow based on `n8n` that:
 - reads the latest legislative projects from RCL,
 - extracts justification documents from the active stage,
 - generates AI summaries and key changes,
+- researches Sejm interpellations, written questions, prints and ELI acts with pagination and source-text enrichment,
 - sends a daily newsletter through Resend.
 
 Repository target:
@@ -31,6 +32,12 @@ Why this is the preferred shape:
   Local HTTP helper used by the workflow.
 - `scripts/rcl_extract_project.py`
   RCL parser that fetches the active stage and extracts project content.
+- `scripts/sejm_research.py`
+  Research layer for the official Sejm and ELI APIs. It paginates capped endpoints,
+  applies the correct publication-date window, and fetches bodies or supporting
+  documents only for likely matches.
+- `BriefingParlamentarnyMNiSW.json`
+  Weekly MNiSW briefing backed by the local research endpoint.
 - `Dockerfile`
   Runtime image for Railway.
 - `start.sh`
@@ -58,6 +65,32 @@ Health check:
 ```bash
 curl http://127.0.0.1:8765/health
 ```
+
+Sejm/ELI research smoke check:
+
+```bash
+python scripts/smoke_briefing_research.py 2026-07-06 2026-07-13 --max-enrich 2
+```
+
+The helper exposes:
+
+```text
+GET /sejm-research?dateFrom=YYYY-MM-DD&dateTo=YYYY-MM-DD&scope=mnisw&term=10&maxEnrich=8
+```
+
+The endpoint uses `since`/`till` plus pagination for parliamentary questions,
+filters the full prints list locally by delivery/change date, and calls
+`/eli/acts/search` with `pubDateFrom`/`pubDateTo`. ELI publication date is used
+instead of the act's signing date so acts announced during the reporting window
+aren't missed.
+
+## Production on Proxmox
+
+The current production instance runs in Proxmox LXC 105. The helper is managed
+by `n8n-helper.service`, application files live under `/opt/n8n-app`, and n8n
+runs in the `n8n` Docker container. Workflow CLI imports must be followed by an
+explicit `publish:workflow` and an n8n restart because n8n 2.x separates saved
+and published workflow versions.
 
 ### 2. n8n
 Run `n8n` locally as you do today and import `RPL.json` if needed.
