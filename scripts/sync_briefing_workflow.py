@@ -25,7 +25,7 @@ research["parameters"] = {
     "url": "={{ 'http://127.0.0.1:8765/sejm-research?dateFrom=' + encodeURIComponent($('Init: daty i stan').first().json.dateFrom) + '&dateTo=' + encodeURIComponent($('Init: daty i stan').first().json.dateTo) + '&scope=mnisw&term=10&maxEnrich=8' }}",
     "options": {
         "response": {"response": {"responseFormat": "json"}},
-        "timeout": 180000,
+        "timeout": 600000,
     },
 }
 research["position"] = [460, 250]

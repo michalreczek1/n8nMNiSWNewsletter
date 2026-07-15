@@ -166,6 +166,7 @@ def test_workflow_uses_research_helper_instead_of_unsupported_api_queries():
     assert "dateFrom=" in research["parameters"]["url"]
     assert "dateTo=" in research["parameters"]["url"]
     assert "queryParameters" not in research["parameters"]
+    assert research["parameters"]["options"]["timeout"] == 600000
 
 
 def test_filter_node_returns_status_scan_stats_and_source_errors():
