@@ -127,6 +127,18 @@ def test_question_metadata_path_does_not_fetch_nested_reply(monkeypatch):
     assert item["researchQuality"] == "metadata"
 
 
+def test_scope_labels_do_not_promote_generic_sectoral_research_institutes():
+    module = load_module("sejm_research_scope")
+    assert module.matched_scope_labels(
+        "Stan infrastruktury instytutów badawczych nadzorowanych przez ministra zdrowia",
+        "mnisw",
+    ) == []
+    assert "science-institutions" in module.matched_scope_labels(
+        "Powołanie członków Rady Narodowego Centrum Nauki",
+        "mnisw",
+    )
+
+
 def test_print_research_filters_to_week_before_enrichment(monkeypatch):
     module = load_module("sejm_research_prints")
     raw = [

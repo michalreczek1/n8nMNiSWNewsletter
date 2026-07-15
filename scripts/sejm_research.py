@@ -22,7 +22,9 @@ SCOPE_PATTERNS = {
         ("doctoral", re.compile(r"\bdoktoran\w*\b|\bdoktorat\w*\b|\bhabilitac\w*\b|\bstopni\w*\s+naukow\w*\b")),
         ("academic-staff", re.compile(r"\bnauczyciel\w*\s+akademick\w*\b|\bpracownik\w*\s+naukow\w*\b")),
         ("science-policy", re.compile(r"\bbadan\w*\s+naukow\w*\b|\bdzialalnos\w*\s+naukow\w*\b|\bfinansowani\w*\s+nauk\w*\b|\bminister\w*\s+nauki\b")),
-        ("science-institutions", re.compile(r"\bpolsk\w*\s+akademi\w*\s+nauk\w*\b|\bnarodow\w*\s+centrum\s+nauk\w*\b|\bnarodow\w*\s+centrum\s+badan\w*\s+i\s+rozwoju\b|\binstytut\w*\s+badawcz\w*\b|\bsiec\w*\s+badawcz\w*\s+lukasiewicz\b|\bnawa\b|\bpolon\b")),
+        # Ogolny "instytut badawczy" obejmuje tez jednostki resortow zdrowia,
+        # obrony i rolnictwa. Research ma premiowac instytucje systemu MNiSW.
+        ("science-institutions", re.compile(r"\bpolsk\w*\s+akademi\w*\s+nauk\w*\b|\bnarodow\w*\s+centrum\s+nauk\w*\b|\bnarodow\w*\s+centrum\s+badan\w*\s+i\s+rozwoju\b|\bsiec\w*\s+badawcz\w*\s+lukasiewicz\b|\bnawa\b|\bpolon\b")),
     ],
     "cyber": [
         ("cybersecurity", re.compile(r"\bcyberbezpieczen\w*\b|\bkrajow\w*\s+system\w*\s+cyberbezpieczen\w*\b|\bnis\s*2?\b|\bdora\b")),
