@@ -19,6 +19,9 @@ def test_workflow_has_schedule_credentials_and_two_recipients():
     assert recipients == "michalreczek@gmail.com,wmotylewska@gmail.com"
     assert nodes["Send via Resend"]["credentials"]["httpHeaderAuth"]["id"] == "8pIewAUkFsshffYZ"
     assert nodes["Groq Chat Model"]["credentials"]["groqApi"]["id"] == "j4jwLe5JW6aKUJ0O"
+    assert nodes["Analyse fit and requirements"]["retryOnFail"] is True
+    assert nodes["Analyse fit and requirements"]["waitBetweenTries"] == 65000
+    assert nodes["Send via Resend"]["retryOnFail"] is True
 
 
 def test_workflow_marks_state_only_after_resend_delivery_merge():

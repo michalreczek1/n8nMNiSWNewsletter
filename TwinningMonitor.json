@@ -219,7 +219,10 @@
         "options": {
           "systemPromptTemplate": "Jesteś polskim doradcą analizującym oficjalne fiszki projektów Twinning UE. Zwróć wyłącznie JSON zgodny ze schematem. Pisz po polsku, precyzyjnie i bez marketingu. Oddziel wymagania dla Project Leadera, Resident Twinning Advisera, liderów komponentów i ekspertów krótkoterminowych. Nie zmyślaj. Jeżeli danych brakuje, napisz to wprost. Podkreśl, że osoba fizyczna nie składa samodzielnej oferty: musi być delegowana przez kwalifikującą się administrację publiczną lub Mandated Body. Uwzględnij terminy, kraj, tryb pobytu RTA, misje ekspertów, budżet, czas realizacji i język, jeśli są w źródle."
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 65000
     },
     {
       "id": "tw12",
@@ -312,7 +315,10 @@
           "id": "8pIewAUkFsshffYZ",
           "name": "Header Auth account"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "id": "tw16",

@@ -9,7 +9,7 @@ def read_script(name: str) -> str:
     return (ROOT / "scripts" / name).read_text(encoding="utf-8")
 
 
-def node(node_id, name, node_type, position, parameters, *, version=1, credentials=None):
+def node(node_id, name, node_type, position, parameters, *, version=1, credentials=None, **extra):
     payload = {
         "id": node_id,
         "name": name,
@@ -20,6 +20,7 @@ def node(node_id, name, node_type, position, parameters, *, version=1, credentia
     }
     if credentials:
         payload["credentials"] = credentials
+    payload.update(extra)
     return payload
 
 
@@ -158,6 +159,9 @@ def build_workflow():
                 },
             },
             version=1.2,
+            retryOnFail=True,
+            maxTries=5,
+            waitBetweenTries=65000,
         ),
         node(
             "tw12",
@@ -206,6 +210,9 @@ def build_workflow():
             },
             version=4.2,
             credentials={"httpHeaderAuth": {"id": "8pIewAUkFsshffYZ", "name": "Header Auth account"}},
+            retryOnFail=True,
+            maxTries=3,
+            waitBetweenTries=5000,
         ),
         node(
             "tw16",
