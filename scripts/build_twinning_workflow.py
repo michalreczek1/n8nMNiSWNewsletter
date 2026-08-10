@@ -181,7 +181,7 @@ def build_workflow():
             "Build decision email",
             "n8n-nodes-base.code",
             [2880, 360],
-            {"mode": "runOnceForEachItem", "jsCode": read_script("twinning_build_email.js")},
+            {"mode": "runOnceForAllItems", "jsCode": read_script("twinning_build_email.js")},
             version=2,
         ),
         node(
@@ -220,7 +220,7 @@ def build_workflow():
             "Remember successful notification",
             "n8n-nodes-base.code",
             [3600, 360],
-            {"mode": "runOnceForEachItem", "jsCode": read_script("twinning_mark_sent.js")},
+            {"mode": "runOnceForAllItems", "jsCode": read_script("twinning_mark_sent.js")},
             version=2,
         ),
         node("tw18", "Next offer", "n8n-nodes-base.noOp", [3840, 360], {}, version=1),

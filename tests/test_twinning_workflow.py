@@ -27,9 +27,11 @@ def test_workflow_marks_state_only_after_resend_delivery_merge():
     assert connections["Send via Resend"]["main"][0][0]["node"] == "Merge email and delivery"
     assert connections["Merge email and delivery"]["main"][0][0]["node"] == "Remember successful notification"
     assert connections["Remember successful notification"]["main"][0][0]["node"] == "Next offer"
+    nodes = {node["name"]: node for node in workflow["nodes"]}
+    assert nodes["Build decision email"]["parameters"]["mode"] == "runOnceForAllItems"
+    assert nodes["Remember successful notification"]["parameters"]["mode"] == "runOnceForAllItems"
 
 
 def test_generated_export_matches_builder():
     export = json.loads((ROOT / "TwinningMonitor.json").read_text(encoding="utf-8"))
     assert export == build_workflow()
-
