@@ -5,6 +5,8 @@ from urllib.parse import parse_qs, urlparse
 
 from rcl_extract_project import extract_project, fetch_bytes
 from sejm_research import research_legal_sources
+from twinning_monitor import extract_offer as extract_twinning_offer
+from twinning_monitor import list_active_offers
 
 
 HOST = os.getenv("RCL_HELPER_HOST", "127.0.0.1")
@@ -71,6 +73,42 @@ class Handler(BaseHTTPRequestHandler):
                 return
             except Exception as exc:  # pragma: no cover - surfaced in response
                 self.respond(502, {"error": True, "message": f"Sejm research failed: {exc}"})
+                return
+            self.respond(200, payload)
+            return
+
+        if parsed.path == "/twinning/offers":
+            params = parse_qs(parsed.query or "")
+            list_url = (params.get("url") or [""])[0].strip() or None
+            lookback_days = (params.get("lookbackDays") or ["180"])[0].strip() or "180"
+            max_offers = (params.get("maxOffers") or ["30"])[0].strip() or "30"
+            try:
+                kwargs = {
+                    "lookback_days": int(lookback_days),
+                    "max_offers": int(max_offers),
+                }
+                if list_url:
+                    kwargs["list_url"] = list_url
+                payload = list_active_offers(**kwargs)
+            except (TypeError, ValueError) as exc:
+                self.respond(400, {"error": True, "message": str(exc)})
+                return
+            except Exception as exc:  # pragma: no cover - surfaced in response
+                self.respond(502, {"error": True, "message": f"Twinning listing failed: {exc}"})
+                return
+            self.respond(200, payload)
+            return
+
+        if parsed.path == "/twinning/extract":
+            params = parse_qs(parsed.query or "")
+            offer_url = (params.get("url") or [""])[0].strip()
+            if not offer_url:
+                self.respond(400, {"error": True, "message": "Missing url"})
+                return
+            try:
+                payload = extract_twinning_offer(offer_url)
+            except Exception as exc:  # pragma: no cover - surfaced in response
+                self.respond(502, {"error": True, "message": f"Twinning extraction failed: {exc}"})
                 return
             self.respond(200, payload)
             return

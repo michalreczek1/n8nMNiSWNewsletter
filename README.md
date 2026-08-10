@@ -171,6 +171,42 @@ Notes:
 - The workflow currently assumes the helper is available at `127.0.0.1:8765`; this is intentional for the single-service deployment model.
 - If you later split the helper into a separate Railway service, the helper URL in the workflow will need to be changed.
 
+## MSZ Twinning Monitor
+
+`TwinningMonitor.json` monitors the active fiches published at
+`https://twinning.msz.gov.pl/fiszki-twinning`.
+
+The workflow:
+
+- checks the MFA page every 30 minutes,
+- detects new offers and later changes using a stable content hash,
+- downloads the ZIP attachment and selects the primary C1/Twinning Fiche,
+- extracts PDF and DOCX text locally through the Python helper,
+- uses the existing Groq credential to summarize purpose, roles, requirements,
+  travel, budget, duration, deadlines and application eligibility,
+- sends one decision-oriented email through the existing Resend credential to
+  `michalreczek@gmail.com` and `wmotylewska@gmail.com`,
+- records a fiche as sent only after the Resend request succeeds.
+
+Helper endpoints:
+
+```text
+GET /twinning/offers
+GET /twinning/extract?url=<offer-url>
+```
+
+Run the focused checks locally:
+
+```powershell
+python -m pytest tests/test_twinning_monitor.py tests/test_twinning_workflow.py tests/test_rcl_extract_service.py -q
+python scripts/smoke_twinning.py
+node scripts/preview_twinning_email.cjs .tmp-twinning-email.html
+```
+
+The Playwright smoke script resolves Playwright from the project used as its
+working directory and checks desktop and mobile rendering without horizontal
+overflow.
+
 ## Next Milestone Steps
 
 Phase 4 prepares the repository and deployment bootstrap.

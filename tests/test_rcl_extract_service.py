@@ -109,3 +109,26 @@ def test_sejm_research_endpoint_returns_structured_payload(monkeypatch):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_twinning_offers_endpoint_returns_structured_payload(monkeypatch):
+    monkeypatch.setenv("RCL_HELPER_HOST", "127.0.0.1")
+    monkeypatch.setenv("RCL_HELPER_PORT", "8770")
+    service = load_service_module("rcl_extract_service_twinning_test")
+
+    def fake_list_active_offers(**kwargs):
+        assert kwargs == {"lookback_days": 180, "max_offers": 30}
+        return {"activeOffers": [{"offerId": "TEST-1"}], "errors": []}
+
+    monkeypatch.setattr(service, "list_active_offers", fake_list_active_offers)
+    server = ThreadingHTTPServer((service.HOST, service.PORT), service.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    time.sleep(0.2)
+
+    try:
+        body = urlopen(f"http://{service.HOST}:{service.PORT}/twinning/offers", timeout=5).read()
+        assert '"offerId": "TEST-1"' in body.decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
