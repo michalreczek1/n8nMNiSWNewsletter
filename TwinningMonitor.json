@@ -78,7 +78,7 @@
             },
             {
               "name": "waitSeconds",
-              "value": 1,
+              "value": 70,
               "type": "number"
             }
           ]

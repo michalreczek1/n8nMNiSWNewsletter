@@ -16,7 +16,9 @@ def test_workflow_has_schedule_credentials_and_two_recipients():
     }
     config = nodes["Config"]["parameters"]["assignments"]["assignments"]
     recipients = next(item["value"] for item in config if item["name"] == "toEmailsCsv")
+    wait_seconds = next(item["value"] for item in config if item["name"] == "waitSeconds")
     assert recipients == "michalreczek@gmail.com,wmotylewska@gmail.com"
+    assert wait_seconds == 70
     assert nodes["Send via Resend"]["credentials"]["httpHeaderAuth"]["id"] == "8pIewAUkFsshffYZ"
     assert nodes["Groq Chat Model"]["credentials"]["groqApi"]["id"] == "j4jwLe5JW6aKUJ0O"
     assert nodes["Analyse fit and requirements"]["retryOnFail"] is True

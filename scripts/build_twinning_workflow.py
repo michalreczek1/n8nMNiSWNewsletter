@@ -53,7 +53,7 @@ def build_workflow():
                         {"name": "lookbackDays", "value": 180, "type": "number"},
                         {"name": "maxOffers", "value": 30, "type": "number"},
                         {"name": "retentionDays", "value": 730, "type": "number"},
-                        {"name": "waitSeconds", "value": 1, "type": "number"},
+                        {"name": "waitSeconds", "value": 70, "type": "number"},
                     ]
                 },
                 "options": {},
