@@ -184,13 +184,17 @@ The workflow:
 - extracts PDF and DOCX text locally through the Python helper,
 - uses the existing Groq credential to summarize purpose, roles, requirements,
   travel, budget, duration, deadlines and application eligibility,
-- compares each fiche with the configured profile: public administration degree
-  from a Faculty of Law and Administration plus experience in digitalisation,
-  IT, higher education and science, project/process management, administrative
-  procedure, legislation and anti-corruption,
+- compares each fiche with the configured profile: an MA in public
+  administration from the Jagiellonian University Faculty of Law and
+  Administration, KSAP, Java training and English C1; central-government work
+  since 2010; current MNiSW IT project delivery for the digitalisation of higher
+  education and science; earlier KPRM work in eInterpelacje, legislation,
+  regulatory reform, project/process management and anti-corruption; plus a UK
+  government internship and cooperation with the Council of Europe,
 - immediately sends both strong and borderline matches (uncertainty is always
-  routed to the user for a final decision), with STE/ad hoc work treated as the
-  preferred entry route for someone without prior Twinning experience,
+  routed to the user for a final decision), with STE/ad hoc and Component Leader
+  work treated as realistic entry routes while PL/RTA requirements are assessed
+  individually,
 - sends a compact digest of clearly unrelated new offers every two days,
 - delivers through the existing Resend credential to
   `michalreczek@gmail.com` and `wmotylewska@gmail.com`,

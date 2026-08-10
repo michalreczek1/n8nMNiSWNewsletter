@@ -54,7 +54,13 @@ def test_workflow_sends_strong_and_borderline_but_queues_clear_nonmatches():
     assert fit_outputs[1][0]["node"] == "Queue for two-day digest"
     nodes = {node["name"]: node for node in workflow["nodes"]}
     prompt = nodes["Analyse fit and requirements"]["parameters"]["options"]["systemPromptTemplate"]
-    assert "administracja publiczna na Wydziale Prawa i Administracji" in prompt
+    assert "magister administracji Uniwersytetu Jagiellońskiego" in prompt
+    assert "Od września 2024 r. radca w Ministerstwie Nauki i Szkolnictwa Wyższego" in prompt
+    assert "prowadzi projekty informatyczne" in prompt
+    assert "język angielski C1" in prompt
+    assert "staż w administracji brytyjskiej i współpracę z Radą Europy" in prompt
+    assert "lider komponentu są realnymi rolami" in prompt
+    assert "nie zakładaj wcześniejszego formalnego udziału w projekcie Twinning" in prompt
     assert "W każdej sytuacji granicznej wybierz borderline" in prompt
     assert "Short-Term Experts (STE)/ekspertów ad hoc" in prompt
     assert nodes["Queue for two-day digest"]["parameters"]["method"] == "POST"
