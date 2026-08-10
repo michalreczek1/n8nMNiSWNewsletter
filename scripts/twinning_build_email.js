@@ -31,6 +31,7 @@ function renderFact(label, value) {
 const payload = $json || {};
 const ai = payload.output && typeof payload.output === 'object' ? payload.output : {};
 const isUpdate = payload.notificationType === 'updated';
+const fitLabel = ai.fitBand === 'strong' ? 'Dobre dopasowanie' : 'Możliwe dopasowanie — oceń samodzielnie';
 const statusLabel = isUpdate ? 'Aktualizacja fiszki' : 'Nowa fiszka Twinning';
 const statusColor = isUpdate ? '#b45309' : '#047857';
 const statusBackground = isUpdate ? '#fff7ed' : '#ecfdf5';
@@ -52,6 +53,9 @@ const facts = [
   renderFact('Czas projektu', ai.duration),
   renderFact('Miejsce i wyjazdy', ai.locationAndTravel),
   renderFact('Język', ai.language),
+  renderFact('Dopasowanie do profilu', `${fitLabel}${ai.fitScore !== undefined ? ` (${ai.fitScore}/100)` : ''}`),
+  renderFact('Najlepsza rola wejściowa', ai.bestEntryRole),
+  renderFact('Doświadczenie międzynarodowe', ai.internationalExperienceRequirement),
 ].join('');
 
 const html = `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:20px;background:#eef2f7;font-family:Arial,Helvetica,sans-serif;color:#0f172a"><div style="max-width:720px;margin:0 auto">
@@ -63,7 +67,7 @@ const html = `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta n
 
   <div style="background:${statusBackground};border:1px solid ${isUpdate ? '#fed7aa' : '#a7f3d0'};border-radius:14px;padding:18px 20px;margin-top:18px">
     <div style="font-size:11px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:${statusColor};margin-bottom:7px">Ocena do szybkiej decyzji</div>
-    <div style="font-size:15px;line-height:1.7;color:#1f2937">${escapeHtml(decision || 'Szczegóły zostały odczytane z oficjalnej fiszki. Otwórz dokument źródłowy, aby zweryfikować dopasowanie do Twojego doświadczenia.')}</div>
+    <div style="font-size:15px;line-height:1.7;color:#1f2937"><strong>${escapeHtml(fitLabel)}.</strong> ${escapeHtml(clean(ai.fitReason))}${ai.fitReason ? '<br><br>' : ''}${escapeHtml(decision || 'Szczegóły zostały odczytane z oficjalnej fiszki. Otwórz dokument źródłowy, aby zweryfikować dopasowanie do Twojego doświadczenia.')}</div>
   </div>
 
   <div style="background:#fff;border:1px solid #dbe3ee;border-radius:14px;padding:22px;margin-top:18px">
@@ -116,4 +120,3 @@ return [{ json: {
     payload.attachmentUrl ? `Załączniki: ${payload.attachmentUrl}` : '',
   ].filter(value => value !== '').join('\n'),
 } }];
-

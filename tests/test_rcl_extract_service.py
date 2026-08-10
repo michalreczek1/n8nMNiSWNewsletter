@@ -1,10 +1,11 @@
 import importlib.util
+import json
 import sys
 import threading
 import time
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -129,6 +130,57 @@ def test_twinning_offers_endpoint_returns_structured_payload(monkeypatch):
     try:
         body = urlopen(f"http://{service.HOST}:{service.PORT}/twinning/offers", timeout=5).read()
         assert '"offerId": "TEST-1"' in body.decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_twinning_digest_queue_and_ack_endpoints(monkeypatch, tmp_path):
+    monkeypatch.setenv("RCL_HELPER_HOST", "127.0.0.1")
+    monkeypatch.setenv("RCL_HELPER_PORT", "8771")
+    monkeypatch.setenv("TWINNING_STATE_PATH", str(tmp_path / "state.json"))
+    service = load_service_module("rcl_extract_service_twinning_digest_test")
+    server = ThreadingHTTPServer((service.HOST, service.PORT), service.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    time.sleep(0.2)
+
+    try:
+        item = {
+            "offerId": "TEST-DIGEST",
+            "contentHash": "hash-digest",
+            "title": "Outside profile",
+            "country": "Exampleland",
+            "area": "Rolnictwo",
+            "url": "https://example.test/digest",
+            "fitBand": "no_fit",
+        }
+        request = Request(
+            f"http://{service.HOST}:{service.PORT}/twinning/queue-digest",
+            data=json.dumps(item).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        queued = json.loads(urlopen(request, timeout=5).read())
+        assert queued == {"queued": True, "offerId": "TEST-DIGEST", "status": "digest_pending"}
+
+        digest = json.loads(
+            urlopen(f"http://{service.HOST}:{service.PORT}/twinning/digest", timeout=5).read()
+        )
+        assert digest["pendingOffers"][0]["offerId"] == "TEST-DIGEST"
+
+        ack_request = Request(
+            f"http://{service.HOST}:{service.PORT}/twinning/digest-ack",
+            data=json.dumps({"offerIds": ["TEST-DIGEST"], "recipients": ["one@example.test"], "resendId": "r-1"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        acknowledged = json.loads(urlopen(ack_request, timeout=5).read())
+        assert acknowledged == {"acknowledged": True, "count": 1}
+        digest_after = json.loads(
+            urlopen(f"http://{service.HOST}:{service.PORT}/twinning/digest", timeout=5).read()
+        )
+        assert digest_after == {"pendingOffers": []}
     finally:
         server.shutdown()
         server.server_close()

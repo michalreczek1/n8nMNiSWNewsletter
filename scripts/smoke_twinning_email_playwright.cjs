@@ -5,7 +5,9 @@ const { pathToFileURL } = require('url');
 
 const fixturePath = path.resolve(process.argv[2] || path.join(__dirname, '..', '.tmp-twinning-email.html'));
 const screenshotDir = path.resolve(process.argv[3] || path.join(__dirname, '..', '.tmp-twinning-playwright'));
+const digestPath = process.argv[4] ? path.resolve(process.argv[4]) : null;
 if (!fs.existsSync(fixturePath)) throw new Error(`Missing preview: ${fixturePath}`);
+if (digestPath && !fs.existsSync(digestPath)) throw new Error(`Missing digest preview: ${digestPath}`);
 fs.mkdirSync(screenshotDir, { recursive: true });
 
 const projectRequire = createRequire(path.join(process.cwd(), 'package.json'));
@@ -24,12 +26,27 @@ const { chromium } = projectRequire('playwright');
       await page.getByText('Nowa fiszka Twinning', { exact: false }).waitFor();
       await page.getByText('Wymagania obowiązkowe', { exact: true }).waitFor();
       await page.getByText('Ważne: jak można dołączyć', { exact: true }).waitFor();
+      await page.locator('strong').filter({ hasText: 'Możliwe dopasowanie — oceń samodzielnie' }).waitFor();
       const links = await page.locator('a').count();
       if (links !== 2) throw new Error(`Expected 2 CTA links, got ${links}`);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       if (overflow > 1) throw new Error(`Horizontal overflow ${overflow}px for ${item.name}`);
       await page.screenshot({ path: path.join(screenshotDir, `${item.name}.png`), fullPage: true });
       await page.close();
+    }
+    if (digestPath) {
+      for (const item of cases) {
+        const page = await browser.newPage({ viewport: { width: item.width, height: item.height } });
+        await page.goto(pathToFileURL(digestPath).href, { waitUntil: 'load' });
+        await page.getByText('Pozostałe nowe fiszki Twinning', { exact: true }).waitFor();
+        await page.getByText('Dziedzina:', { exact: false }).first().waitFor();
+        const links = await page.locator('a').count();
+        if (links !== 2) throw new Error(`Expected 2 digest links, got ${links}`);
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+        if (overflow > 1) throw new Error(`Digest horizontal overflow ${overflow}px for ${item.name}`);
+        await page.screenshot({ path: path.join(screenshotDir, `digest-${item.name}.png`), fullPage: true });
+        await page.close();
+      }
     }
     process.stdout.write(JSON.stringify({ ok: true, screenshots: screenshotDir }));
   } finally {
@@ -39,4 +56,3 @@ const { chromium } = projectRequire('playwright');
   console.error(error);
   process.exit(1);
 });
-

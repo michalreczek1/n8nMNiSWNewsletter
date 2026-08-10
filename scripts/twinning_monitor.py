@@ -1,20 +1,20 @@
-"""Fetch and extract active Twinning fiches published by the Polish MFA.
-
-The module intentionally has no persistence. n8n owns notification state and only
-records an offer after Resend confirms delivery acceptance.
-"""
+"""Fetch, extract and track active Twinning fiches published by the Polish MFA."""
 
 from __future__ import annotations
 
 import hashlib
 import io
 import json
+import os
 import re
+import tempfile
+import threading
 import time
 import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
@@ -30,6 +30,8 @@ USER_AGENT = "FamilyOS-Twinning-Monitor/1.0 (+https://familyos.pl)"
 MAX_DOWNLOAD_BYTES = 40 * 1024 * 1024
 MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
 MAX_ANALYSIS_CHARS = 40_000
+DEFAULT_STATE_PATH = Path(os.getenv("TWINNING_STATE_PATH", "/opt/n8n-app/data/twinning-state.json"))
+_STATE_LOCK = threading.RLock()
 
 
 POLISH_MONTHS = {
@@ -52,6 +54,151 @@ POLISH_MONTHS = {
 
 class TwinningError(RuntimeError):
     """A recoverable source or document-processing error."""
+
+
+def load_notification_state(path: str | Path = DEFAULT_STATE_PATH) -> dict:
+    state_path = Path(path)
+    if not state_path.exists():
+        return {"offers": {}}
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise TwinningError(f"Nie można odczytać rejestru wysyłek {state_path}: {exc}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("offers"), dict):
+        raise TwinningError(f"Nieprawidłowy format rejestru wysyłek: {state_path}")
+    return payload
+
+
+def apply_notification_state(payload: dict, path: str | Path = DEFAULT_STATE_PATH) -> dict:
+    state = load_notification_state(path)
+    sent_offers = state["offers"]
+    for offer in payload.get("activeOffers", []):
+        previous = sent_offers.get(offer.get("offerId"))
+        if previous and previous.get("contentHash") == offer.get("contentHash"):
+            offer["notificationType"] = None
+        else:
+            offer["notificationType"] = "updated" if previous else "new"
+    return payload
+
+
+def _write_notification_state(state: dict, state_path: Path) -> None:
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_name = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=state_path.parent,
+            prefix=f".{state_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_name = handle.name
+            json.dump(state, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, state_path)
+    finally:
+        if temp_name and os.path.exists(temp_name):
+            os.unlink(temp_name)
+
+
+def acknowledge_offer(
+    offer_id: str,
+    content_hash: str,
+    recipients: list[str] | None = None,
+    resend_id: str | None = None,
+    *,
+    path: str | Path = DEFAULT_STATE_PATH,
+) -> dict:
+    if not offer_id or not content_hash:
+        raise ValueError("offerId and contentHash are required")
+    state_path = Path(path)
+    with _STATE_LOCK:
+        state = load_notification_state(state_path)
+        entry = {
+            "contentHash": content_hash,
+            "status": "immediate_sent",
+            "sentAt": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "recipients": recipients or [],
+            "resendId": resend_id or None,
+        }
+        state["offers"][offer_id] = entry
+        _write_notification_state(state, state_path)
+    return entry
+
+
+def queue_digest_offer(item: dict, *, path: str | Path = DEFAULT_STATE_PATH) -> dict:
+    required = ("offerId", "contentHash", "title", "url")
+    if any(not item.get(key) for key in required):
+        raise ValueError("offerId, contentHash, title and url are required")
+    state_path = Path(path)
+    with _STATE_LOCK:
+        state = load_notification_state(state_path)
+        entry = {
+            "contentHash": str(item["contentHash"]),
+            "status": "digest_pending",
+            "queuedAt": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "digestItem": {
+                key: item.get(key)
+                for key in (
+                    "offerId",
+                    "contentHash",
+                    "title",
+                    "country",
+                    "area",
+                    "mszDeadline",
+                    "url",
+                    "fitBand",
+                    "fitScore",
+                    "fitReason",
+                    "bestEntryRole",
+                )
+            },
+        }
+        state["offers"][str(item["offerId"])] = entry
+        _write_notification_state(state, state_path)
+    return entry
+
+
+def pending_digest_offers(path: str | Path = DEFAULT_STATE_PATH) -> list[dict]:
+    state = load_notification_state(path)
+    return [
+        entry["digestItem"]
+        for entry in state["offers"].values()
+        if entry.get("status") == "digest_pending" and isinstance(entry.get("digestItem"), dict)
+    ]
+
+
+def acknowledge_digest(
+    offer_ids: list[str],
+    recipients: list[str] | None = None,
+    resend_id: str | None = None,
+    *,
+    path: str | Path = DEFAULT_STATE_PATH,
+) -> int:
+    state_path = Path(path)
+    with _STATE_LOCK:
+        state = load_notification_state(state_path)
+        sent_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        changed = 0
+        for offer_id in offer_ids:
+            entry = state["offers"].get(offer_id)
+            if not entry or entry.get("status") != "digest_pending":
+                continue
+            entry.update(
+                {
+                    "status": "digest_sent",
+                    "digestSentAt": sent_at,
+                    "recipients": recipients or [],
+                    "resendId": resend_id or None,
+                }
+            )
+            changed += 1
+        if changed:
+            _write_notification_state(state, state_path)
+    return changed
 
 
 def _clean(value: str | None) -> str:

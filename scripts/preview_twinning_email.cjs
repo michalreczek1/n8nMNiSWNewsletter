@@ -30,6 +30,11 @@ const fixture = {
     locationAndTravel: 'Gambia; RTA na miejscu, eksperci ad hoc podczas misji',
     language: 'angielski',
     whoCanApply: 'Polska jednostka administracji publicznej albo Mandated Body; ekspert indywidualny przez uprawnioną instytucję.',
+    fitBand: 'borderline',
+    fitScore: 68,
+    fitReason: 'Zakres regulacyjny i procesowy może pasować, ale wymagania sektorowe trzeba zweryfikować.',
+    bestEntryRole: 'Short-Term Expert / ekspert ad hoc ds. procedur administracyjnych',
+    internationalExperienceRequirement: 'Wcześniejsze doświadczenie międzynarodowe jest mile widziane, ale nie wskazano go jako obowiązkowego dla wszystkich STE.',
   },
 };
 
@@ -37,4 +42,3 @@ const result = vm.runInNewContext(`(() => { ${code} })()`, { $json: fixture });
 if (!Array.isArray(result) || !result[0]?.json?.html) throw new Error('Email builder did not return HTML');
 fs.writeFileSync(outputPath, result[0].json.html, 'utf8');
 process.stdout.write(JSON.stringify({ outputPath, subject: result[0].json.subject, recipientsReady: true }));
-

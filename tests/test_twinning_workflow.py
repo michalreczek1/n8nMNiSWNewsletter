@@ -24,17 +24,41 @@ def test_workflow_has_schedule_credentials_and_two_recipients():
     assert nodes["Analyse fit and requirements"]["retryOnFail"] is True
     assert nodes["Analyse fit and requirements"]["waitBetweenTries"] == 65000
     assert nodes["Send via Resend"]["retryOnFail"] is True
+    assert nodes["Digest every two days"]["parameters"]["rule"]["interval"][0] == {
+        "field": "days",
+        "daysInterval": 2,
+        "triggerAtHour": 8,
+    }
+    digest_config = nodes["Digest config"]["parameters"]["assignments"]["assignments"]
+    digest_recipients = next(item["value"] for item in digest_config if item["name"] == "toEmailsCsv")
+    assert digest_recipients == recipients
+    assert nodes["Send digest via Resend"]["credentials"]["httpHeaderAuth"]["id"] == "8pIewAUkFsshffYZ"
 
 
 def test_workflow_marks_state_only_after_resend_delivery_merge():
     workflow = build_workflow()
     connections = workflow["connections"]
     assert connections["Send via Resend"]["main"][0][0]["node"] == "Merge email and delivery"
-    assert connections["Merge email and delivery"]["main"][0][0]["node"] == "Remember successful notification"
-    assert connections["Remember successful notification"]["main"][0][0]["node"] == "Next offer"
+    assert connections["Merge email and delivery"]["main"][0][0]["node"] == "Acknowledge successful notification"
+    assert connections["Acknowledge successful notification"]["main"][0][0]["node"] == "Next offer"
     nodes = {node["name"]: node for node in workflow["nodes"]}
     assert nodes["Build decision email"]["parameters"]["mode"] == "runOnceForAllItems"
-    assert nodes["Remember successful notification"]["parameters"]["mode"] == "runOnceForAllItems"
+    assert "/twinning/ack?" in nodes["Acknowledge successful notification"]["parameters"]["url"]
+
+
+def test_workflow_sends_strong_and_borderline_but_queues_clear_nonmatches():
+    workflow = build_workflow()
+    connections = workflow["connections"]
+    fit_outputs = connections["Is profile match or borderline"]["main"]
+    assert fit_outputs[0][0]["node"] == "Build decision email"
+    assert fit_outputs[1][0]["node"] == "Queue for two-day digest"
+    nodes = {node["name"]: node for node in workflow["nodes"]}
+    prompt = nodes["Analyse fit and requirements"]["parameters"]["options"]["systemPromptTemplate"]
+    assert "administracja publiczna na Wydziale Prawa i Administracji" in prompt
+    assert "W każdej sytuacji granicznej wybierz borderline" in prompt
+    assert "Short-Term Experts (STE)/ekspertów ad hoc" in prompt
+    assert nodes["Queue for two-day digest"]["parameters"]["method"] == "POST"
+    assert nodes["Acknowledge digest delivery"]["parameters"]["method"] == "POST"
 
 
 def test_generated_export_matches_builder():

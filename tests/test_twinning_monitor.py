@@ -108,3 +108,62 @@ def test_analysis_excerpt_keeps_requirements_from_long_document():
     excerpt = tm._analysis_excerpt(text)
     assert len(excerpt) <= tm.MAX_ANALYSIS_CHARS
     assert "minimum 10 years" in excerpt
+
+
+def test_durable_notification_state_marks_new_sent_and_updated(tmp_path):
+    state_path = tmp_path / "twinning-state.json"
+    base = {"activeOffers": [{"offerId": "TEST-1", "contentHash": "hash-one"}]}
+    assert tm.apply_notification_state(base, state_path)["activeOffers"][0]["notificationType"] == "new"
+
+    saved = tm.acknowledge_offer(
+        "TEST-1",
+        "hash-one",
+        ["one@example.test", "two@example.test"],
+        "resend-123",
+        path=state_path,
+    )
+    assert saved["resendId"] == "resend-123"
+    assert tm.apply_notification_state(base, state_path)["activeOffers"][0]["notificationType"] is None
+
+    changed = {"activeOffers": [{"offerId": "TEST-1", "contentHash": "hash-two"}]}
+    assert tm.apply_notification_state(changed, state_path)["activeOffers"][0]["notificationType"] == "updated"
+    assert tm.load_notification_state(state_path)["offers"]["TEST-1"]["recipients"] == [
+        "one@example.test",
+        "two@example.test",
+    ]
+
+
+def test_nonmatching_offer_moves_through_digest_queue(tmp_path):
+    state_path = tmp_path / "twinning-state.json"
+    item = {
+        "offerId": "TEST-2",
+        "contentHash": "hash-two",
+        "title": "Agriculture controls",
+        "country": "Exampleland",
+        "area": "Rolnictwo",
+        "mszDeadline": "20 sierpnia 2026 r.",
+        "url": "https://example.test/offer",
+        "fitBand": "no_fit",
+        "fitScore": 5,
+        "fitReason": "Dziedzina poza profilem.",
+        "bestEntryRole": "STE rolnictwa",
+    }
+    queued = tm.queue_digest_offer(item, path=state_path)
+    assert queued["status"] == "digest_pending"
+    assert tm.pending_digest_offers(state_path) == [item]
+    assert tm.apply_notification_state(
+        {"activeOffers": [{"offerId": "TEST-2", "contentHash": "hash-two"}]},
+        state_path,
+    )["activeOffers"][0]["notificationType"] is None
+
+    changed = tm.acknowledge_digest(
+        ["TEST-2"],
+        ["one@example.test", "two@example.test"],
+        "digest-resend-1",
+        path=state_path,
+    )
+    assert changed == 1
+    assert tm.pending_digest_offers(state_path) == []
+    entry = tm.load_notification_state(state_path)["offers"]["TEST-2"]
+    assert entry["status"] == "digest_sent"
+    assert entry["resendId"] == "digest-resend-1"

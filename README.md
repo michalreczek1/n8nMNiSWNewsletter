@@ -184,15 +184,30 @@ The workflow:
 - extracts PDF and DOCX text locally through the Python helper,
 - uses the existing Groq credential to summarize purpose, roles, requirements,
   travel, budget, duration, deadlines and application eligibility,
-- sends one decision-oriented email through the existing Resend credential to
+- compares each fiche with the configured profile: public administration degree
+  from a Faculty of Law and Administration plus experience in digitalisation,
+  IT, higher education and science, project/process management, administrative
+  procedure, legislation and anti-corruption,
+- immediately sends both strong and borderline matches (uncertainty is always
+  routed to the user for a final decision), with STE/ad hoc work treated as the
+  preferred entry route for someone without prior Twinning experience,
+- sends a compact digest of clearly unrelated new offers every two days,
+- delivers through the existing Resend credential to
   `michalreczek@gmail.com` and `wmotylewska@gmail.com`,
-- records a fiche as sent only after the Resend request succeeds.
+- writes state atomically to `/opt/n8n-app/data/twinning-state.json`; an offer is
+  recorded only after immediate Resend acceptance or after it enters the digest
+  queue, and digest entries are closed only after Resend accepts the digest.
 
 Helper endpoints:
 
 ```text
 GET /twinning/offers
 GET /twinning/extract?url=<offer-url>
+GET /twinning/digest
+GET /twinning/state
+GET /twinning/ack?... (internal only)
+POST /twinning/queue-digest
+POST /twinning/digest-ack
 ```
 
 Run the focused checks locally:

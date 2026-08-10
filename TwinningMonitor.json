@@ -72,11 +72,6 @@
               "type": "number"
             },
             {
-              "name": "retentionDays",
-              "value": 730,
-              "type": "number"
-            },
-            {
               "name": "waitSeconds",
               "value": 70,
               "type": "number"
@@ -134,7 +129,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const cfg = $json;\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.sentOffers) staticData.sentOffers = {};\n\nconst retentionDays = Number(cfg.retentionDays || 730);\nconst cutoff = Date.now() - retentionDays * 86400000;\nfor (const [offerId, value] of Object.entries(staticData.sentOffers)) {\n  const sentAt = value?.sentAt ? Date.parse(value.sentAt) : 0;\n  if (!sentAt || sentAt < cutoff) delete staticData.sentOffers[offerId];\n}\n\nconst toEmails = String(cfg.toEmailsCsv || '')\n  .split(',')\n  .map(value => value.trim())\n  .filter(Boolean);\n\nconst offers = Array.isArray(cfg.activeOffers) ? cfg.activeOffers : [];\nreturn offers\n  .filter(offer => offer?.offerId && offer?.contentHash && offer?.url)\n  .filter(offer => staticData.sentOffers[offer.offerId]?.contentHash !== offer.contentHash)\n  .map(offer => ({\n    json: {\n      ...offer,\n      notificationType: staticData.sentOffers[offer.offerId] ? 'updated' : 'new',\n      fromEmail: cfg.fromEmail,\n      toEmails,\n      waitSeconds: Number(cfg.waitSeconds || 1),\n    },\n  }));\n\n"
+        "jsCode": "const cfg = $json;\nconst toEmails = String(cfg.toEmailsCsv || '')\n  .split(',')\n  .map(value => value.trim())\n  .filter(Boolean);\n\nconst offers = Array.isArray(cfg.activeOffers) ? cfg.activeOffers : [];\nreturn offers\n  .filter(offer => offer?.offerId && offer?.contentHash && offer?.url)\n  .filter(offer => offer.notificationType === 'new' || offer.notificationType === 'updated')\n  .map(offer => ({\n    json: {\n      ...offer,\n      fromEmail: cfg.fromEmail,\n      toEmails,\n      waitSeconds: Number(cfg.waitSeconds || 1),\n    },\n  }));\n"
       }
     },
     {
@@ -215,9 +210,9 @@
       "parameters": {
         "text": "={{ ['DANE OGŁOSZENIA MSZ:', $json.pageText || '', 'TEKST FISZKI:', $json.analysisText || ''].join('\\n\\n') }}",
         "schemaType": "manual",
-        "inputSchema": "{\"type\": \"object\", \"properties\": {\"projectTitle\": {\"type\": \"string\"}, \"purpose\": {\"type\": \"string\", \"description\": \"Cel projektu po polsku w 2-4 konkretnych zdaniach.\"}, \"soughtProfiles\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"description\": \"Role i profile ekspertów: PL, RTA, liderzy komponentów, eksperci ad hoc.\"}, \"mandatoryRequirements\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"description\": \"Konkretne wymagania: wykształcenie, lata doświadczenia, sektor, język, obywatelstwo/status.\"}, \"keyTasks\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"locationAndTravel\": {\"type\": \"string\"}, \"duration\": {\"type\": \"string\"}, \"budget\": {\"type\": \"string\"}, \"language\": {\"type\": \"string\"}, \"whoCanApply\": {\"type\": \"string\", \"description\": \"Wyjaśnij, że ofertę składa administracja publiczna lub Mandated Body, a ekspert indywidualny działa przez uprawnioną instytucję.\"}, \"decisionSummary\": {\"type\": \"string\", \"description\": \"Krótka ocena komu warto aplikować i co jest główną barierą.\"}, \"risksOrCaveats\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"sourceQuality\": {\"type\": \"string\", \"description\": \"high, medium albo low\"}}, \"required\": [\"purpose\", \"soughtProfiles\", \"mandatoryRequirements\", \"whoCanApply\", \"decisionSummary\"]}",
+        "inputSchema": "{\"type\": \"object\", \"properties\": {\"projectTitle\": {\"type\": \"string\"}, \"purpose\": {\"type\": \"string\", \"description\": \"Cel projektu po polsku w 2-4 konkretnych zdaniach.\"}, \"soughtProfiles\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"description\": \"Role i profile ekspertów: PL, RTA, liderzy komponentów, eksperci ad hoc.\"}, \"mandatoryRequirements\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"description\": \"Konkretne wymagania: wykształcenie, lata doświadczenia, sektor, język, obywatelstwo/status.\"}, \"keyTasks\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"locationAndTravel\": {\"type\": \"string\"}, \"duration\": {\"type\": \"string\"}, \"budget\": {\"type\": \"string\"}, \"language\": {\"type\": \"string\"}, \"whoCanApply\": {\"type\": \"string\", \"description\": \"Wyjaśnij, że ofertę składa administracja publiczna lub Mandated Body, a ekspert indywidualny działa przez uprawnioną instytucję.\"}, \"decisionSummary\": {\"type\": \"string\", \"description\": \"Krótka ocena komu warto aplikować i co jest główną barierą.\"}, \"risksOrCaveats\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"sourceQuality\": {\"type\": \"string\", \"description\": \"high, medium albo low\"}, \"fitBand\": {\"type\": \"string\", \"enum\": [\"strong\", \"borderline\", \"no_fit\"], \"description\": \"Dopasowanie do profilu użytkownika. Przy niepewności zawsze borderline, nigdy no_fit.\"}, \"fitScore\": {\"type\": \"integer\", \"minimum\": 0, \"maximum\": 100}, \"fitReason\": {\"type\": \"string\", \"description\": \"Konkretne uzasadnienie dopasowania lub niedopasowania do profilu.\"}, \"bestEntryRole\": {\"type\": \"string\", \"description\": \"Najbardziej realna rola wejściowa, preferuj STE/ekspert ad hoc.\"}, \"internationalExperienceRequirement\": {\"type\": \"string\", \"description\": \"Czy wcześniejsze doświadczenie międzynarodowe/Twinning jest wymagane, preferowane czy niewskazane.\"}}, \"required\": [\"purpose\", \"soughtProfiles\", \"mandatoryRequirements\", \"whoCanApply\", \"decisionSummary\", \"fitBand\", \"fitScore\", \"fitReason\", \"bestEntryRole\", \"internationalExperienceRequirement\"]}",
         "options": {
-          "systemPromptTemplate": "Jesteś polskim doradcą analizującym oficjalne fiszki projektów Twinning UE. Zwróć wyłącznie JSON zgodny ze schematem. Pisz po polsku, precyzyjnie i bez marketingu. Oddziel wymagania dla Project Leadera, Resident Twinning Advisera, liderów komponentów i ekspertów krótkoterminowych. Nie zmyślaj. Jeżeli danych brakuje, napisz to wprost. Podkreśl, że osoba fizyczna nie składa samodzielnej oferty: musi być delegowana przez kwalifikującą się administrację publiczną lub Mandated Body. Uwzględnij terminy, kraj, tryb pobytu RTA, misje ekspertów, budżet, czas realizacji i język, jeśli są w źródle."
+          "systemPromptTemplate": "Jesteś polskim doradcą analizującym oficjalne fiszki projektów Twinning UE. Zwróć wyłącznie JSON zgodny ze schematem. Pisz po polsku, precyzyjnie i bez marketingu. Oddziel wymagania dla Project Leadera, Resident Twinning Advisera, liderów komponentów oraz Short-Term Experts (STE)/ekspertów ad hoc. Nie zmyślaj. Jeżeli danych brakuje, napisz to wprost. Profil użytkownika: wykształcenie — administracja publiczna na Wydziale Prawa i Administracji; doświadczenie — cyfryzacja, informatyzacja, szkolnictwo wyższe i nauka, zarządzanie projektami, zarządzanie procesowe, administracja i postępowanie administracyjne, decyzje administracyjne, legislacja oraz przeciwdziałanie korupcji. Użytkownik nie ma jeszcze doświadczenia w projektach międzynarodowych/Twinning, więc najbardziej realną drogą wejścia jest STE lub ekspert ad hoc. Nie myl junior partner (instytucja w konsorcjum) z początkującym ekspertem. fitBand=strong, gdy istnieje wyraźnie dopasowana rola; fitBand=borderline, gdy dopasowanie jest możliwe, brakuje danych o kwalifikacjach albo doświadczenie międzynarodowe jest tylko preferowane; fitBand=no_fit wyłącznie gdy dziedzina jest wyraźnie obca lub każda dostępna rola ma jednoznaczne, niespełnione wymaganie wcześniejszego doświadczenia międzynarodowego/Twinning. W każdej sytuacji granicznej wybierz borderline. Podkreśl, że osoba fizyczna nie składa samodzielnej oferty: musi być delegowana przez kwalifikującą się administrację publiczną lub Mandated Body. Uwzględnij terminy, kraj, tryb pobytu RTA, misje ekspertów, budżet, czas realizacji i język, jeśli są w źródle."
         }
       },
       "retryOnFail": true,
@@ -264,26 +259,57 @@
     },
     {
       "id": "tw14",
-      "name": "Build decision email",
-      "type": "n8n-nodes-base.code",
+      "name": "Is profile match or borderline",
+      "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        2880,
+        2860,
         360
       ],
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "function clean(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction escapeHtml(value) {\n  return String(value || '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\nfunction list(value, limit = 8) {\n  if (!Array.isArray(value)) return [];\n  return value.map(clean).filter(Boolean).slice(0, limit);\n}\n\nfunction renderList(title, values, accent = '#1d4ed8') {\n  const items = list(values);\n  if (!items.length) return '';\n  return `<div style=\"margin:18px 0 0\"><div style=\"font-size:12px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:${accent};margin-bottom:8px\">${escapeHtml(title)}</div><ul style=\"margin:0;padding-left:20px;color:#334155;font-size:14px;line-height:1.7\">${items.map(item => `<li style=\"margin:0 0 6px\">${escapeHtml(item)}</li>`).join('')}</ul></div>`;\n}\n\nfunction renderFact(label, value) {\n  const normalized = clean(value);\n  if (!normalized) return '';\n  return `<tr><td style=\"padding:8px 12px 8px 0;color:#64748b;font-size:12px;font-weight:700;text-transform:uppercase;vertical-align:top;white-space:nowrap\">${escapeHtml(label)}</td><td style=\"padding:8px 0;color:#0f172a;font-size:14px;line-height:1.55\">${escapeHtml(normalized)}</td></tr>`;\n}\n\nconst payload = $json || {};\nconst ai = payload.output && typeof payload.output === 'object' ? payload.output : {};\nconst isUpdate = payload.notificationType === 'updated';\nconst statusLabel = isUpdate ? 'Aktualizacja fiszki' : 'Nowa fiszka Twinning';\nconst statusColor = isUpdate ? '#b45309' : '#047857';\nconst statusBackground = isUpdate ? '#fff7ed' : '#ecfdf5';\nconst title = clean(payload.title || ai.projectTitle || 'Nowa oferta Twinning');\nconst country = clean(payload.country || payload.beneficiary || ai.locationAndTravel);\nconst purpose = clean(ai.purpose || ai.decisionSummary || payload.pageText);\nconst decision = clean(ai.decisionSummary || purpose);\nconst sourceFiles = Array.isArray(payload.sourceFiles)\n  ? payload.sourceFiles.map(file => file.name).filter(Boolean).join(', ')\n  : clean(payload.primaryDocument);\n\nconst facts = [\n  renderFact('Kraj / beneficjent', country),\n  renderFact('Obszar', payload.area),\n  renderFact('Numer', payload.reference || payload.offerId),\n  renderFact('Termin do MSZ', payload.mszDeadline),\n  renderFact('Termin beneficjenta', payload.beneficiaryDeadline),\n  renderFact('Budżet', ai.budget),\n  renderFact('Czas projektu', ai.duration),\n  renderFact('Miejsce i wyjazdy', ai.locationAndTravel),\n  renderFact('Język', ai.language),\n].join('');\n\nconst html = `<!doctype html><html lang=\"pl\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body style=\"margin:0;padding:20px;background:#eef2f7;font-family:Arial,Helvetica,sans-serif;color:#0f172a\"><div style=\"max-width:720px;margin:0 auto\">\n  <div style=\"background:linear-gradient(135deg,#0f2f55,#1d4ed8);color:#fff;border-radius:18px;padding:30px 28px;box-shadow:0 16px 40px rgba(30,64,175,.2)\">\n    <div style=\"display:inline-block;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 12px;font-size:11px;font-weight:800;letter-spacing:.8px;text-transform:uppercase\">${escapeHtml(statusLabel)}</div>\n    <h1 style=\"font-size:24px;line-height:1.35;margin:16px 0 8px\">${escapeHtml(title)}</h1>\n    <div style=\"font-size:14px;line-height:1.7;opacity:.9\">${escapeHtml(country)}${payload.area ? ` · ${escapeHtml(payload.area)}` : ''}</div>\n  </div>\n\n  <div style=\"background:${statusBackground};border:1px solid ${isUpdate ? '#fed7aa' : '#a7f3d0'};border-radius:14px;padding:18px 20px;margin-top:18px\">\n    <div style=\"font-size:11px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:${statusColor};margin-bottom:7px\">Ocena do szybkiej decyzji</div>\n    <div style=\"font-size:15px;line-height:1.7;color:#1f2937\">${escapeHtml(decision || 'Szczegóły zostały odczytane z oficjalnej fiszki. Otwórz dokument źródłowy, aby zweryfikować dopasowanie do Twojego doświadczenia.')}</div>\n  </div>\n\n  <div style=\"background:#fff;border:1px solid #dbe3ee;border-radius:14px;padding:22px;margin-top:18px\">\n    <h2 style=\"font-size:18px;margin:0 0 10px;color:#0f172a\">Najważniejsze informacje</h2>\n    <p style=\"font-size:14px;line-height:1.75;color:#334155;margin:0 0 12px\">${escapeHtml(purpose)}</p>\n    <table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin-top:8px\">${facts}</table>\n    ${renderList('Kogo szukają', ai.soughtProfiles, '#7c3aed')}\n    ${renderList('Wymagania obowiązkowe', ai.mandatoryRequirements, '#b45309')}\n    ${renderList('Główne zadania', ai.keyTasks, '#1d4ed8')}\n    ${renderList('Na co uważać', ai.risksOrCaveats, '#be123c')}\n  </div>\n\n  <div style=\"background:#fff7ed;border:1px solid #fdba74;border-radius:14px;padding:18px 20px;margin-top:18px\">\n    <div style=\"font-size:12px;font-weight:800;color:#9a3412;text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px\">Ważne: jak można dołączyć</div>\n    <div style=\"font-size:14px;line-height:1.7;color:#431407\">${escapeHtml(clean(ai.whoCanApply) || 'Ofertę składa polska jednostka administracji publicznej albo instytucja ze statusem Mandated Body. Indywidualny ekspert uczestniczy przez taką instytucję — jako RTA, lider komponentu lub ekspert ad hoc — a nie jako samodzielny oferent.')}</div>\n  </div>\n\n  <div style=\"text-align:center;margin:22px 0 8px\"><a href=\"${escapeHtml(payload.url)}\" style=\"display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;border-radius:10px;padding:12px 20px;font-size:14px;font-weight:700\">Otwórz ogłoszenie MSZ</a>${payload.attachmentUrl ? ` <a href=\"${escapeHtml(payload.attachmentUrl)}\" style=\"display:inline-block;background:#fff;color:#1d4ed8;text-decoration:none;border:1px solid #93c5fd;border-radius:10px;padding:11px 20px;font-size:14px;font-weight:700;margin-left:6px\">Pobierz załączniki</a>` : ''}</div>\n\n  <div style=\"font-size:11px;line-height:1.6;color:#94a3b8;text-align:center;margin:18px 0\">Automatyczny monitoring strony MSZ · sprawdzanie co 30 minut<br>Analiza dokumentu: ${escapeHtml(payload.primaryDocument || sourceFiles || 'oficjalna fiszka')} · zweryfikuj dane przed aplikowaniem.</div>\n</div></body></html>`;\n\nconst plainLists = [\n  ['Kogo szukają', list(ai.soughtProfiles)],\n  ['Wymagania obowiązkowe', list(ai.mandatoryRequirements)],\n  ['Główne zadania', list(ai.keyTasks)],\n  ['Na co uważać', list(ai.risksOrCaveats)],\n].map(([heading, values]) => values.length ? `${heading}:\\n- ${values.join('\\n- ')}` : '').filter(Boolean).join('\\n\\n');\n\nconst subjectPrefix = isUpdate ? 'AKTUALIZACJA FISZKI' : 'NOWA FISZKA TWINNING';\nreturn [{ json: {\n  ...payload,\n  subject: `${subjectPrefix}: ${country || payload.area || 'MSZ'} — ${title}`.slice(0, 220),\n  html,\n  text: [\n    statusLabel,\n    title,\n    country,\n    `Termin do MSZ: ${clean(payload.mszDeadline) || 'sprawdź w ogłoszeniu'}`,\n    '',\n    decision,\n    '',\n    purpose,\n    '',\n    plainLists,\n    '',\n    `Kto może aplikować: ${clean(ai.whoCanApply) || 'polska administracja publiczna / Mandated Body; ekspert indywidualny przez uprawnioną instytucję'}`,\n    '',\n    `Ogłoszenie: ${payload.url}`,\n    payload.attachmentUrl ? `Załączniki: ${payload.attachmentUrl}` : '',\n  ].filter(value => value !== '').join('\\n'),\n} }];\n\n"
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ (($json.output && $json.output.fitBand) || 'borderline') !== 'no_fit' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       }
     },
     {
       "id": "tw15",
+      "name": "Build decision email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3100,
+        260
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function clean(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction escapeHtml(value) {\n  return String(value || '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\nfunction list(value, limit = 8) {\n  if (!Array.isArray(value)) return [];\n  return value.map(clean).filter(Boolean).slice(0, limit);\n}\n\nfunction renderList(title, values, accent = '#1d4ed8') {\n  const items = list(values);\n  if (!items.length) return '';\n  return `<div style=\"margin:18px 0 0\"><div style=\"font-size:12px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:${accent};margin-bottom:8px\">${escapeHtml(title)}</div><ul style=\"margin:0;padding-left:20px;color:#334155;font-size:14px;line-height:1.7\">${items.map(item => `<li style=\"margin:0 0 6px\">${escapeHtml(item)}</li>`).join('')}</ul></div>`;\n}\n\nfunction renderFact(label, value) {\n  const normalized = clean(value);\n  if (!normalized) return '';\n  return `<tr><td style=\"padding:8px 12px 8px 0;color:#64748b;font-size:12px;font-weight:700;text-transform:uppercase;vertical-align:top;white-space:nowrap\">${escapeHtml(label)}</td><td style=\"padding:8px 0;color:#0f172a;font-size:14px;line-height:1.55\">${escapeHtml(normalized)}</td></tr>`;\n}\n\nconst payload = $json || {};\nconst ai = payload.output && typeof payload.output === 'object' ? payload.output : {};\nconst isUpdate = payload.notificationType === 'updated';\nconst fitLabel = ai.fitBand === 'strong' ? 'Dobre dopasowanie' : 'Możliwe dopasowanie — oceń samodzielnie';\nconst statusLabel = isUpdate ? 'Aktualizacja fiszki' : 'Nowa fiszka Twinning';\nconst statusColor = isUpdate ? '#b45309' : '#047857';\nconst statusBackground = isUpdate ? '#fff7ed' : '#ecfdf5';\nconst title = clean(payload.title || ai.projectTitle || 'Nowa oferta Twinning');\nconst country = clean(payload.country || payload.beneficiary || ai.locationAndTravel);\nconst purpose = clean(ai.purpose || ai.decisionSummary || payload.pageText);\nconst decision = clean(ai.decisionSummary || purpose);\nconst sourceFiles = Array.isArray(payload.sourceFiles)\n  ? payload.sourceFiles.map(file => file.name).filter(Boolean).join(', ')\n  : clean(payload.primaryDocument);\n\nconst facts = [\n  renderFact('Kraj / beneficjent', country),\n  renderFact('Obszar', payload.area),\n  renderFact('Numer', payload.reference || payload.offerId),\n  renderFact('Termin do MSZ', payload.mszDeadline),\n  renderFact('Termin beneficjenta', payload.beneficiaryDeadline),\n  renderFact('Budżet', ai.budget),\n  renderFact('Czas projektu', ai.duration),\n  renderFact('Miejsce i wyjazdy', ai.locationAndTravel),\n  renderFact('Język', ai.language),\n  renderFact('Dopasowanie do profilu', `${fitLabel}${ai.fitScore !== undefined ? ` (${ai.fitScore}/100)` : ''}`),\n  renderFact('Najlepsza rola wejściowa', ai.bestEntryRole),\n  renderFact('Doświadczenie międzynarodowe', ai.internationalExperienceRequirement),\n].join('');\n\nconst html = `<!doctype html><html lang=\"pl\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body style=\"margin:0;padding:20px;background:#eef2f7;font-family:Arial,Helvetica,sans-serif;color:#0f172a\"><div style=\"max-width:720px;margin:0 auto\">\n  <div style=\"background:linear-gradient(135deg,#0f2f55,#1d4ed8);color:#fff;border-radius:18px;padding:30px 28px;box-shadow:0 16px 40px rgba(30,64,175,.2)\">\n    <div style=\"display:inline-block;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 12px;font-size:11px;font-weight:800;letter-spacing:.8px;text-transform:uppercase\">${escapeHtml(statusLabel)}</div>\n    <h1 style=\"font-size:24px;line-height:1.35;margin:16px 0 8px\">${escapeHtml(title)}</h1>\n    <div style=\"font-size:14px;line-height:1.7;opacity:.9\">${escapeHtml(country)}${payload.area ? ` · ${escapeHtml(payload.area)}` : ''}</div>\n  </div>\n\n  <div style=\"background:${statusBackground};border:1px solid ${isUpdate ? '#fed7aa' : '#a7f3d0'};border-radius:14px;padding:18px 20px;margin-top:18px\">\n    <div style=\"font-size:11px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:${statusColor};margin-bottom:7px\">Ocena do szybkiej decyzji</div>\n    <div style=\"font-size:15px;line-height:1.7;color:#1f2937\"><strong>${escapeHtml(fitLabel)}.</strong> ${escapeHtml(clean(ai.fitReason))}${ai.fitReason ? '<br><br>' : ''}${escapeHtml(decision || 'Szczegóły zostały odczytane z oficjalnej fiszki. Otwórz dokument źródłowy, aby zweryfikować dopasowanie do Twojego doświadczenia.')}</div>\n  </div>\n\n  <div style=\"background:#fff;border:1px solid #dbe3ee;border-radius:14px;padding:22px;margin-top:18px\">\n    <h2 style=\"font-size:18px;margin:0 0 10px;color:#0f172a\">Najważniejsze informacje</h2>\n    <p style=\"font-size:14px;line-height:1.75;color:#334155;margin:0 0 12px\">${escapeHtml(purpose)}</p>\n    <table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin-top:8px\">${facts}</table>\n    ${renderList('Kogo szukają', ai.soughtProfiles, '#7c3aed')}\n    ${renderList('Wymagania obowiązkowe', ai.mandatoryRequirements, '#b45309')}\n    ${renderList('Główne zadania', ai.keyTasks, '#1d4ed8')}\n    ${renderList('Na co uważać', ai.risksOrCaveats, '#be123c')}\n  </div>\n\n  <div style=\"background:#fff7ed;border:1px solid #fdba74;border-radius:14px;padding:18px 20px;margin-top:18px\">\n    <div style=\"font-size:12px;font-weight:800;color:#9a3412;text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px\">Ważne: jak można dołączyć</div>\n    <div style=\"font-size:14px;line-height:1.7;color:#431407\">${escapeHtml(clean(ai.whoCanApply) || 'Ofertę składa polska jednostka administracji publicznej albo instytucja ze statusem Mandated Body. Indywidualny ekspert uczestniczy przez taką instytucję — jako RTA, lider komponentu lub ekspert ad hoc — a nie jako samodzielny oferent.')}</div>\n  </div>\n\n  <div style=\"text-align:center;margin:22px 0 8px\"><a href=\"${escapeHtml(payload.url)}\" style=\"display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;border-radius:10px;padding:12px 20px;font-size:14px;font-weight:700\">Otwórz ogłoszenie MSZ</a>${payload.attachmentUrl ? ` <a href=\"${escapeHtml(payload.attachmentUrl)}\" style=\"display:inline-block;background:#fff;color:#1d4ed8;text-decoration:none;border:1px solid #93c5fd;border-radius:10px;padding:11px 20px;font-size:14px;font-weight:700;margin-left:6px\">Pobierz załączniki</a>` : ''}</div>\n\n  <div style=\"font-size:11px;line-height:1.6;color:#94a3b8;text-align:center;margin:18px 0\">Automatyczny monitoring strony MSZ · sprawdzanie co 30 minut<br>Analiza dokumentu: ${escapeHtml(payload.primaryDocument || sourceFiles || 'oficjalna fiszka')} · zweryfikuj dane przed aplikowaniem.</div>\n</div></body></html>`;\n\nconst plainLists = [\n  ['Kogo szukają', list(ai.soughtProfiles)],\n  ['Wymagania obowiązkowe', list(ai.mandatoryRequirements)],\n  ['Główne zadania', list(ai.keyTasks)],\n  ['Na co uważać', list(ai.risksOrCaveats)],\n].map(([heading, values]) => values.length ? `${heading}:\\n- ${values.join('\\n- ')}` : '').filter(Boolean).join('\\n\\n');\n\nconst subjectPrefix = isUpdate ? 'AKTUALIZACJA FISZKI' : 'NOWA FISZKA TWINNING';\nreturn [{ json: {\n  ...payload,\n  subject: `${subjectPrefix}: ${country || payload.area || 'MSZ'} — ${title}`.slice(0, 220),\n  html,\n  text: [\n    statusLabel,\n    title,\n    country,\n    `Termin do MSZ: ${clean(payload.mszDeadline) || 'sprawdź w ogłoszeniu'}`,\n    '',\n    decision,\n    '',\n    purpose,\n    '',\n    plainLists,\n    '',\n    `Kto może aplikować: ${clean(ai.whoCanApply) || 'polska administracja publiczna / Mandated Body; ekspert indywidualny przez uprawnioną instytucję'}`,\n    '',\n    `Ogłoszenie: ${payload.url}`,\n    payload.attachmentUrl ? `Załączniki: ${payload.attachmentUrl}` : '',\n  ].filter(value => value !== '').join('\\n'),\n} }];\n"
+      }
+    },
+    {
+      "id": "tw16",
       "name": "Send via Resend",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3120,
-        440
+        3340,
+        340
       ],
       "parameters": {
         "method": "POST",
@@ -321,13 +347,13 @@
       "waitBetweenTries": 5000
     },
     {
-      "id": "tw16",
+      "id": "tw17",
       "name": "Merge email and delivery",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
       "position": [
-        3360,
-        360
+        3580,
+        260
       ],
       "parameters": {
         "mode": "combine",
@@ -336,29 +362,263 @@
       }
     },
     {
-      "id": "tw17",
-      "name": "Remember successful notification",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "id": "tw18",
+      "name": "Acknowledge successful notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
-        3600,
-        360
+        3820,
+        260
       ],
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const payload = $json || {};\nif (!payload.offerId || !payload.contentHash) {\n  throw new Error('Nie można zapisać stanu Twinning bez offerId i contentHash');\n}\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.sentOffers) staticData.sentOffers = {};\nstaticData.sentOffers[payload.offerId] = {\n  contentHash: payload.contentHash,\n  sentAt: new Date().toISOString(),\n  recipients: Array.isArray(payload.toEmails) ? payload.toEmails : [],\n  resendId: payload.id || payload.resendId || null,\n};\nreturn [{ json: { offerId: payload.offerId, sent: true, sentAt: staticData.sentOffers[payload.offerId].sentAt } }];\n\n"
+        "method": "GET",
+        "url": "={{ 'http://127.0.0.1:8765/twinning/ack?offerId=' + encodeURIComponent($json.offerId) + '&contentHash=' + encodeURIComponent($json.contentHash) + '&recipients=' + encodeURIComponent(($json.toEmails || []).join(',')) + '&resendId=' + encodeURIComponent($json.id || $json.resendId || '') }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
       }
     },
     {
-      "id": "tw18",
+      "id": "tw19",
+      "name": "Queue for two-day digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3100,
+        520
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8765/twinning/queue-digest",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({ offerId: $json.offerId, contentHash: $json.contentHash, title: $json.title, country: $json.country, area: $json.area, mszDeadline: $json.mszDeadline, url: $json.url, fitBand: ($json.output && $json.output.fitBand) || 'no_fit', fitScore: ($json.output && $json.output.fitScore) || 0, fitReason: ($json.output && $json.output.fitReason) || '', bestEntryRole: ($json.output && $json.output.bestEntryRole) || '' }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "id": "tw20",
       "name": "Next offer",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        3840,
+        4060,
         360
       ],
       "parameters": {}
+    },
+    {
+      "id": "tw21",
+      "name": "Digest every two days",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        180,
+        780
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 2,
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "tw22",
+      "name": "Digest config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        420,
+        780
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "fromEmail",
+              "value": "twinning@send.familyos.pl",
+              "type": "string"
+            },
+            {
+              "name": "toEmailsCsv",
+              "value": "michalreczek@gmail.com,wmotylewska@gmail.com",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "tw23",
+      "name": "Fetch digest queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        860
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://127.0.0.1:8765/twinning/digest",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "id": "tw24",
+      "name": "Merge digest config and queue",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        900,
+        780
+      ],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      }
+    },
+    {
+      "id": "tw25",
+      "name": "Build two-day digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        780
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function clean(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction escapeHtml(value) {\n  return String(value || '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\nconst payload = $json || {};\nconst offers = Array.isArray(payload.pendingOffers) ? payload.pendingOffers : [];\nif (!offers.length) return [];\n\nconst toEmails = String(payload.toEmailsCsv || '')\n  .split(',')\n  .map(value => value.trim())\n  .filter(Boolean);\n\nconst sorted = [...offers].sort((a, b) =>\n  clean(a.country).localeCompare(clean(b.country), 'pl') || clean(a.title).localeCompare(clean(b.title), 'pl')\n);\nconst cards = sorted.map(offer => `\n  <div style=\"padding:18px 16px;border-bottom:1px solid #e2e8f0\">\n    <a href=\"${escapeHtml(offer.url)}\" style=\"color:#1d4ed8;font-size:16px;font-weight:700;text-decoration:none;line-height:1.45\">${escapeHtml(clean(offer.title) || 'Oferta Twinning')}</a>\n    <div style=\"margin-top:9px;font-size:13px;line-height:1.7;color:#334155\"><strong>Kraj:</strong> ${escapeHtml(clean(offer.country) || '—')} &nbsp;·&nbsp; <strong>Dziedzina:</strong> ${escapeHtml(clean(offer.area) || '—')}<br><strong>Termin MSZ:</strong> ${escapeHtml(clean(offer.mszDeadline) || 'sprawdź')}</div>\n    ${offer.bestEntryRole ? `<div style=\"color:#64748b;font-size:12px;line-height:1.55;margin-top:6px\"><strong>Potencjalna rola:</strong> ${escapeHtml(offer.bestEntryRole)}</div>` : ''}\n  </div>`).join('');\n\nconst html = `<!doctype html><html lang=\"pl\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body style=\"margin:0;padding:20px;background:#eef2f7;font-family:Arial,Helvetica,sans-serif;color:#0f172a\"><div style=\"max-width:820px;margin:0 auto\">\n  <div style=\"background:linear-gradient(135deg,#334155,#0f172a);color:#fff;border-radius:18px;padding:28px\">\n    <div style=\"font-size:11px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;opacity:.75\">Przegląd co dwa dni</div>\n    <h1 style=\"font-size:24px;line-height:1.35;margin:10px 0 6px\">Pozostałe nowe fiszki Twinning</h1>\n    <div style=\"font-size:14px;opacity:.85\">${sorted.length} ${sorted.length === 1 ? 'oferta wyraźnie poza ustawionym profilem' : 'oferty wyraźnie poza ustawionym profilem'}</div>\n  </div>\n  <div style=\"background:#fff;border:1px solid #dbe3ee;border-radius:14px;margin-top:18px;overflow:hidden\">${cards}</div>\n  <div style=\"font-size:11px;line-height:1.6;color:#94a3b8;text-align:center;margin:18px 0\">Oferty dobre i graniczne są wysyłane natychmiast w osobnych wiadomościach. Ten przegląd zawiera tylko pozostałe nowe oferty.</div>\n</div></body></html>`;\n\nconst textRows = sorted.map(offer => [\n  clean(offer.title),\n  `Kraj: ${clean(offer.country) || 'brak danych'}`,\n  `Dziedzina: ${clean(offer.area) || 'brak danych'}`,\n  `Termin MSZ: ${clean(offer.mszDeadline) || 'sprawdź w ogłoszeniu'}`,\n  offer.bestEntryRole ? `Potencjalna rola: ${clean(offer.bestEntryRole)}` : '',\n  `Ogłoszenie: ${offer.url}`,\n].filter(Boolean).join('\\n')).join('\\n\\n');\n\nlet checksum = 2166136261;\nconst signature = sorted.map(offer => `${offer.offerId}:${offer.contentHash}`).join('|');\nfor (let i = 0; i < signature.length; i += 1) {\n  checksum ^= signature.charCodeAt(i);\n  checksum = Math.imul(checksum, 16777619);\n}\n\nreturn [{ json: {\n  fromEmail: payload.fromEmail,\n  toEmails,\n  offerIds: sorted.map(offer => offer.offerId),\n  digestKey: `twinning-digest/${(checksum >>> 0).toString(16)}`,\n  subject: `TWINNING — przegląd pozostałych nowych ofert (${sorted.length})`,\n  html,\n  text: `Pozostałe nowe fiszki Twinning (${sorted.length})\\n\\n${textRows}`,\n} }];\n"
+      }
+    },
+    {
+      "id": "tw26",
+      "name": "Send digest via Resend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1380,
+        860
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $json.digestKey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({ from: $json.fromEmail, to: $json.toEmails, subject: $json.subject, html: $json.html, text: $json.text }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "8pIewAUkFsshffYZ",
+          "name": "Header Auth account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "tw27",
+      "name": "Merge digest and delivery",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1620,
+        780
+      ],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      }
+    },
+    {
+      "id": "tw28",
+      "name": "Acknowledge digest delivery",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1860,
+        780
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8765/twinning/digest-ack",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({ offerIds: $json.offerIds, recipients: $json.toEmails, resendId: $json.id || $json.resendId || '' }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      }
     }
   ],
   "connections": {
@@ -514,7 +774,25 @@
       "main": [
         [
           {
+            "node": "Is profile match or borderline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is profile match or borderline": {
+      "main": [
+        [
+          {
             "node": "Build decision email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue for two-day digest",
             "type": "main",
             "index": 0
           }
@@ -552,14 +830,25 @@
       "main": [
         [
           {
-            "node": "Remember successful notification",
+            "node": "Acknowledge successful notification",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Remember successful notification": {
+    "Acknowledge successful notification": {
+      "main": [
+        [
+          {
+            "node": "Next offer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue for two-day digest": {
       "main": [
         [
           {
@@ -575,6 +864,93 @@
         [
           {
             "node": "Loop over offers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Digest every two days": {
+      "main": [
+        [
+          {
+            "node": "Digest config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Digest config": {
+      "main": [
+        [
+          {
+            "node": "Fetch digest queue",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge digest config and queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch digest queue": {
+      "main": [
+        [
+          {
+            "node": "Merge digest config and queue",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge digest config and queue": {
+      "main": [
+        [
+          {
+            "node": "Build two-day digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build two-day digest": {
+      "main": [
+        [
+          {
+            "node": "Send digest via Resend",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge digest and delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send digest via Resend": {
+      "main": [
+        [
+          {
+            "node": "Merge digest and delivery",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge digest and delivery": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge digest delivery",
             "type": "main",
             "index": 0
           }
