@@ -88,9 +88,13 @@ aren't missed.
 
 The current production instance runs in Proxmox LXC 105. The helper is managed
 by `n8n-helper.service`, application files live under `/opt/n8n-app`, and n8n
-runs in the `n8n` Docker container. Workflow CLI imports must be followed by an
-explicit `publish:workflow` and an n8n restart because n8n 2.x separates saved
-and published workflow versions.
+runs in the `n8n` Docker container. As of 2026-08-10, production is pinned to
+`docker.n8n.io/n8nio/n8n:2.30.5` by
+`/usr/local/bin/run-n8n-container.sh`; runtime variables are loaded from
+`/etc/n8n/n8n.env`, and persistent state is mounted from
+`/home/n8n/.n8n/data` to `/home/node/.n8n`. Workflow CLI imports must be
+followed by an explicit `publish:workflow` and an n8n restart because n8n 2.x
+separates saved and published workflow versions.
 
 ### 2. n8n
 Run `n8n` locally as you do today and import `RPL.json` if needed.
