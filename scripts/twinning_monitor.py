@@ -29,7 +29,7 @@ LIST_URL = f"{BASE_URL}/fiszki-twinning"
 USER_AGENT = "FamilyOS-Twinning-Monitor/1.0 (+https://familyos.pl)"
 MAX_DOWNLOAD_BYTES = 40 * 1024 * 1024
 MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
-MAX_ANALYSIS_CHARS = 100_000
+MAX_ANALYSIS_CHARS = 40_000
 
 
 POLISH_MONTHS = {
@@ -446,10 +446,10 @@ def _iter_documents(data: bytes, url: str) -> Iterable[tuple[str, bytes]]:
 
 def _analysis_excerpt(text: str) -> str:
     cleaned = re.sub(r"[ \t]+", " ", text).strip()
-    if len(cleaned) <= MAX_ANALYSIS_CHARS:
+    if len(cleaned) <= 25_000:
         return cleaned
 
-    windows: list[tuple[int, int]] = [(0, 20_000)]
+    windows: list[tuple[int, int]] = [(0, 12_000)]
     markers = [
         "3.5 Components and results",
         "3.6 Means/input",
@@ -463,9 +463,11 @@ def _analysis_excerpt(text: str) -> str:
     ]
     lower = cleaned.lower()
     for marker in markers:
-        index = lower.find(marker.lower())
+        # Fiches repeat section names in the table of contents. The last hit is
+        # normally the substantive section with the requirements and tasks.
+        index = lower.rfind(marker.lower())
         if index >= 0:
-            windows.append((max(0, index - 1000), min(len(cleaned), index + 9000)))
+            windows.append((max(0, index - 700), min(len(cleaned), index + 5_500)))
     windows.sort()
     merged: list[tuple[int, int]] = []
     for start, end in windows:

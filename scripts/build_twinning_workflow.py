@@ -147,7 +147,7 @@ def build_workflow():
                             "whoCanApply": {"type": "string", "description": "Wyjaśnij, że ofertę składa administracja publiczna lub Mandated Body, a ekspert indywidualny działa przez uprawnioną instytucję."},
                             "decisionSummary": {"type": "string", "description": "Krótka ocena komu warto aplikować i co jest główną barierą."},
                             "risksOrCaveats": {"type": "array", "items": {"type": "string"}},
-                            "sourceQuality": {"type": "string", "enum": ["high", "medium", "low"]},
+                            "sourceQuality": {"type": "string", "description": "high, medium albo low"},
                         },
                         "required": ["purpose", "soughtProfiles", "mandatoryRequirements", "whoCanApply", "decisionSummary"],
                     },
@@ -270,4 +270,3 @@ if __name__ == "__main__":
     target = ROOT / "TwinningMonitor.json"
     target.write_text(json.dumps(build_workflow(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(target)
-
