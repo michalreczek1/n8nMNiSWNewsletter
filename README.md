@@ -95,9 +95,11 @@ runs in the `n8n` Docker container. As of 2026-09-23, production is pinned to
 `/home/n8n/.n8n/data` to `/home/node/.n8n`. Workflow CLI imports must be
 followed by an explicit `publish:workflow` and an n8n restart because n8n 2.x
 separates saved and published workflow versions.
-The production environment also sets `N8N_PATH=` explicitly (an empty value).
-Without it, n8n 2.40.5 serves an unresolved `{{BASE_PATH}}` placeholder to
-the editor and login navigation fails.
+The production environment sets `N8N_PATH=` explicitly (an empty value) and
+runs `local/n8n:2.40.5-basepath2`, built from `Dockerfile.proxmox`. The derived
+image fixes n8n 2.40.5's static asset base path generation and changes the
+base-path script URL so browsers fetch the corrected version. Rebuild this image
+when upgrading n8n and review the patch in `scripts/patch_n8n_base_path.cjs`.
 
 Before the 2.40.5 upgrade, a compressed copy of persistent n8n data was saved
 on the Proxmox host at

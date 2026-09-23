@@ -1,0 +1,6 @@
+FROM docker.n8n.io/n8nio/n8n:2.40.5
+
+USER root
+COPY scripts/patch_n8n_base_path.cjs /tmp/patch_n8n_base_path.cjs
+RUN node /tmp/patch_n8n_base_path.cjs && rm /tmp/patch_n8n_base_path.cjs
+USER node
