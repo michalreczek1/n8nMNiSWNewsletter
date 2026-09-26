@@ -963,7 +963,7 @@
     "timezone": "Europe/Warsaw",
     "saveManualExecutions": true,
     "saveExecutionProgress": true,
-    "saveDataSuccessExecution": "all",
+    "saveDataSuccessExecution": "none",
     "saveDataErrorExecution": "all"
   },
   "versionId": "twinning-monitor-resend-v1",

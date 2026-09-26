@@ -418,7 +418,7 @@ def build_workflow():
             "timezone": "Europe/Warsaw",
             "saveManualExecutions": True,
             "saveExecutionProgress": True,
-            "saveDataSuccessExecution": "all",
+            "saveDataSuccessExecution": "none",
             "saveDataErrorExecution": "all",
         },
         "versionId": "twinning-monitor-resend-v1",

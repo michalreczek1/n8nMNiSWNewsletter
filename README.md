@@ -105,6 +105,22 @@ Before the 2.40.5 upgrade, a compressed copy of persistent n8n data was saved
 on the Proxmox host at
 `/var/lib/vz/dump/n8n-data-pre-2.40.5-20260923.tar.zst`.
 
+Since 2026-09-26, production does not retain successful executions and keeps
+failed executions for 48 hours. `proxmox-retention.env.example` lists the
+non-secret settings to merge into `/etc/n8n/n8n.env`; do not replace the whole
+environment file. Restart `n8n-docker.service` after changing its environment.
+The RPL, Twinning and parliamentary briefing workflow exports also disable
+successful-execution storage because workflow settings override the instance
+default. Their error-execution storage remains enabled.
+
+The maintenance backup set is stored off the server at
+`E:\Projects\Backup kontenerów\2026-09-26-maintenance`, with verified SHA-256
+checksums. The full LXC 105 archive includes both the root filesystem and the
+separate n8n data volume. An isolated restore and SQLite integrity checks were
+performed before the execution history was cleaned. SQLite files can remain
+large after pruning; reclaim filesystem space with a validated, offline compact
+copy after taking a backup, rather than deleting the database file.
+
 ### 2. n8n
 Run `n8n` locally as you do today and import `RPL.json` if needed.
 

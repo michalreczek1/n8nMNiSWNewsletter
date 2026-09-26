@@ -492,7 +492,7 @@
     "timezone": "Europe/Warsaw",
     "saveManualExecutions": true,
     "saveExecutionProgress": true,
-    "saveDataSuccessExecution": "all",
+    "saveDataSuccessExecution": "none",
     "saveDataErrorExecution": "all",
     "callerPolicy": "workflowsFromSameOwner",
     "errorWorkflow": ""
