@@ -175,8 +175,8 @@ send = by_name["Resend: wyślij email"]
 send["position"] = [3260, 250]
 send["credentials"] = {
     "httpHeaderAuth": {
-        "id": "8pIewAUkFsshffYZ",
-        "name": "Header Auth account",
+        "id": "MNiSWResend20261026",
+        "name": "MNiSW · Resend",
     }
 }
 

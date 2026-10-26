@@ -196,6 +196,12 @@ Notes:
 
 ## Operational Notes
 
+- The RPL and parliamentary MNiSW workflows use `MNiSW · Resend`
+  (`MNiSWResend20261026`), assigned to their n8n project. On 2026-10-26,
+  the invalid `Header Auth account` credential was replaced using the working
+  sending key from `FamilyOS · Resend`. The separate credential is required
+  because the FamilyOS credential belongs to another n8n project. Never put
+  the API key itself in workflow exports or this repository.
 - This repo should never include your local `n8n` database or credential exports containing secrets.
 - The workflow currently assumes the helper is available at `127.0.0.1:8765`; this is intentional for the single-service deployment model.
 - If you later split the helper into a separate Railway service, the helper URL in the workflow will need to be changed.
