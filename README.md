@@ -109,9 +109,11 @@ Since 2026-09-26, production does not retain successful executions and keeps
 failed executions for 48 hours. `proxmox-retention.env.example` lists the
 non-secret settings to merge into `/etc/n8n/n8n.env`; do not replace the whole
 environment file. Restart `n8n-docker.service` after changing its environment.
-The RPL, Twinning and parliamentary briefing workflow exports also disable
+The RPL and parliamentary briefing workflow exports also disable
 successful-execution storage because workflow settings override the instance
-default. Their error-execution storage remains enabled.
+default. Twinning retains successful executions for troubleshooting (since
+2026-11-03); the instance's 48-hour pruning still applies. Error-execution
+storage remains enabled for all three workflows.
 
 The maintenance backup set is stored off the server at
 `E:\Projects\Backup kontenerów\2026-09-26-maintenance`, with verified SHA-256
@@ -213,7 +215,7 @@ Notes:
 
 The workflow:
 
-- checks the MFA page every 30 minutes,
+- checks the MFA page at 08:00 and 15:00 Europe/Warsaw,
 - detects new offers and later changes using a stable content hash,
 - downloads the ZIP attachment and selects the primary C1/Twinning Fiche,
 - extracts PDF and DOCX text locally through the Python helper,
@@ -236,6 +238,16 @@ The workflow:
 - writes state atomically to `/opt/n8n-app/data/twinning-state.json`; an offer is
   recorded only after immediate Resend acceptance or after it enters the digest
   queue, and digest entries are closed only after Resend accepts the digest.
+
+The HTTP helper uses `curl_cffi` with a browser-compatible TLS/HTTP profile:
+the MFA front end can return redirect loops or an HTTP 200 anti-bot placeholder
+to `urllib`. Unrecognized listings and incomplete fiches now raise errors
+instead of being treated as no offers. On 2026-11-03 the renamed schedule's
+disconnected source edge was repaired, both sending nodes were assigned the
+working `MNiSW · Resend` credential, and successful execution history was enabled.
+The builder also preserves the production Groq model and compact AI context.
+The model output budget is 3500 tokens: the previous 1800-token limit truncated
+reasoning-model responses, causing parser retries and Groq rate-limit failures.
 
 Helper endpoints:
 

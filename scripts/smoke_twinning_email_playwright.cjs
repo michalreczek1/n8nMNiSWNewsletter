@@ -14,7 +14,10 @@ const projectRequire = createRequire(path.join(process.cwd(), 'package.json'));
 const { chromium } = projectRequire('playwright');
 
 (async () => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : {}),
+  });
   try {
     const cases = [
       { name: 'desktop', width: 1280, height: 900 },

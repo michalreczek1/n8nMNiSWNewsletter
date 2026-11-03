@@ -10,19 +10,19 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_workflow_has_schedule_credentials_and_two_recipients():
     workflow = build_workflow()
     nodes = {node["name"]: node for node in workflow["nodes"]}
-    assert nodes["Check every 30 minutes"]["parameters"]["rule"]["interval"][0] == {
-        "field": "minutes",
-        "minutesInterval": 30,
+    assert nodes["Check at 08:00 and 15:00"]["parameters"]["rule"]["interval"][0] == {
+        "field": "cronExpression",
+        "expression": "0 8,15 * * *",
     }
     config = nodes["Config"]["parameters"]["assignments"]["assignments"]
     recipients = next(item["value"] for item in config if item["name"] == "toEmailsCsv")
     wait_seconds = next(item["value"] for item in config if item["name"] == "waitSeconds")
     assert recipients == "michalreczek@gmail.com,wmotylewska@gmail.com"
     assert wait_seconds == 70
-    assert nodes["Send via Resend"]["credentials"]["httpHeaderAuth"]["id"] == "8pIewAUkFsshffYZ"
-    assert nodes["Groq Chat Model"]["credentials"]["groqApi"]["id"] == "j4jwLe5JW6aKUJ0O"
+    assert nodes["Send via Resend"]["credentials"]["httpHeaderAuth"]["id"] == "MNiSWResend20261026"
+    assert nodes["Groq Chat Model"]["credentials"]["groqApi"]["id"] == "2S2vBMZiDiMvOYox"
     assert nodes["Analyse fit and requirements"]["retryOnFail"] is True
-    assert nodes["Analyse fit and requirements"]["waitBetweenTries"] == 65000
+    assert nodes["Analyse fit and requirements"]["waitBetweenTries"] == 5000
     assert nodes["Send via Resend"]["retryOnFail"] is True
     assert nodes["Digest every two days"]["parameters"]["rule"]["interval"][0] == {
         "field": "days",
@@ -32,7 +32,7 @@ def test_workflow_has_schedule_credentials_and_two_recipients():
     digest_config = nodes["Digest config"]["parameters"]["assignments"]["assignments"]
     digest_recipients = next(item["value"] for item in digest_config if item["name"] == "toEmailsCsv")
     assert digest_recipients == recipients
-    assert nodes["Send digest via Resend"]["credentials"]["httpHeaderAuth"]["id"] == "8pIewAUkFsshffYZ"
+    assert nodes["Send digest via Resend"]["credentials"]["httpHeaderAuth"]["id"] == "MNiSWResend20261026"
 
 
 def test_workflow_marks_state_only_after_resend_delivery_merge():
@@ -70,3 +70,21 @@ def test_workflow_sends_strong_and_borderline_but_queues_clear_nonmatches():
 def test_generated_export_matches_builder():
     export = json.loads((ROOT / "TwinningMonitor.json").read_text(encoding="utf-8"))
     assert export == build_workflow()
+
+
+def test_every_connection_resolves_and_both_schedules_reach_configuration():
+    workflow = build_workflow()
+    nodes = {node["name"]: node for node in workflow["nodes"]}
+    for source, outputs in workflow["connections"].items():
+        assert source in nodes, f"Disconnected source: {source}"
+        for branches in outputs.values():
+            for branch in branches:
+                for edge in branch:
+                    assert edge["node"] in nodes
+    for schedule, target in [("Check at 08:00 and 15:00", "Config"), ("Digest every two days", "Digest config")]:
+        assert workflow["connections"][schedule]["main"][0][0]["node"] == target
+    assert workflow["settings"]["saveDataSuccessExecution"] == "all"
+    assert workflow["settings"]["saveDataErrorExecution"] == "all"
+    assert nodes["Groq Chat Model"]["parameters"]["model"] == "openai/gpt-oss-120b"
+    assert nodes["Analyse fit and requirements"]["parameters"]["text"] == "={{ $json.analysisContext }}"
+    assert workflow["connections"]["Prepare compact AI context"]["main"][0][0]["node"] == "Analyse fit and requirements"

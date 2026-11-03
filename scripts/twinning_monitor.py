@@ -11,22 +11,21 @@ import tempfile
 import threading
 import time
 import zipfile
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable
-from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
 
+from curl_cffi import requests
 from docx import Document
 from pypdf import PdfReader
 
 
 BASE_URL = "https://twinning.msz.gov.pl"
 LIST_URL = f"{BASE_URL}/fiszki-twinning"
-USER_AGENT = "FamilyOS-Twinning-Monitor/1.0 (+https://familyos.pl)"
 MAX_DOWNLOAD_BYTES = 40 * 1024 * 1024
 MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
 MAX_ANALYSIS_CHARS = 40_000
@@ -219,20 +218,27 @@ def _ascii_url(url: str) -> str:
 
 
 def _request(url: str, *, timeout: int = 30, method: str = "GET") -> tuple[bytes, dict[str, str], str]:
-    request = Request(_ascii_url(url), headers={"User-Agent": USER_AGENT}, method=method)
     last_error: Exception | None = None
     for attempt in range(3):
         try:
-            with urlopen(request, timeout=timeout) as response:
+            # The MFA front end requires a browser-compatible TLS/HTTP client.
+            # urllib can receive a redirect loop or a 200 anti-bot placeholder.
+            with requests.Session(impersonate="chrome") as session, closing(session.request(
+                method, _ascii_url(url), timeout=timeout, stream=True,
+            )) as response:
+                response.raise_for_status()
                 length = int(response.headers.get("Content-Length") or 0)
                 if length > MAX_DOWNLOAD_BYTES:
                     raise TwinningError(f"Plik przekracza limit {MAX_DOWNLOAD_BYTES} B: {url}")
-                data = b"" if method == "HEAD" else response.read(MAX_DOWNLOAD_BYTES + 1)
-                if len(data) > MAX_DOWNLOAD_BYTES:
-                    raise TwinningError(f"Pobrano plik przekraczający limit: {url}")
+                data = bytearray()
+                if method != "HEAD":
+                    for chunk in response.iter_content(chunk_size=65536):
+                        data.extend(chunk)
+                        if len(data) > MAX_DOWNLOAD_BYTES:
+                            raise TwinningError(f"Pobrano plik przekraczający limit: {url}")
                 headers = {key.lower(): value for key, value in response.headers.items()}
-                return data, headers, response.geturl()
-        except (HTTPError, URLError, TimeoutError, OSError) as exc:
+                return bytes(data), headers, response.url
+        except (requests.RequestsError, TimeoutError, OSError) as exc:
             last_error = exc
             if attempt < 2:
                 time.sleep(0.5 * (attempt + 1))
@@ -339,6 +345,10 @@ def parse_listing(html: str) -> list[ListingOffer]:
             continue
         seen.add(offer.url)
         result.append(offer)
+    if not result:
+        if "_incapsula_resource" in html.lower() or "incapsula incident id" in html.lower():
+            raise TwinningError("MSZ zwróciło stronę ochrony antybotowej zamiast listy fiszek")
+        raise TwinningError("Nie rozpoznano listy fiszek MSZ; nie można potwierdzić braku ofert")
     return result
 
 
@@ -460,6 +470,10 @@ def parse_detail(html: str, source_url: str) -> dict[str, str | None]:
             "sourceUrl": source_url,
         }
     )
+    if not fields["reference"] or not fields["attachmentUrl"]:
+        if "_incapsula_resource" in html.lower() or "incapsula incident id" in html.lower():
+            raise TwinningError("MSZ zwróciło stronę ochrony antybotowej zamiast fiszki")
+        raise TwinningError(f"Niekompletna fiszka MSZ: {source_url}")
     return fields
 
 

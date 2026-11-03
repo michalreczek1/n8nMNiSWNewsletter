@@ -1,5 +1,6 @@
 import io
 import zipfile
+import pytest
 from datetime import date
 
 from docx import Document
@@ -44,6 +45,73 @@ def test_parse_listing_extracts_labels_and_absolute_links():
     assert offers[0].country == "Gambia"
     assert offers[0].url == "https://twinning.msz.gov.pl/fiszki-twinning/example-one/"
     assert offers[1].area == "Sprawiedliwość"
+
+
+def test_valid_pages_can_include_the_msz_security_script():
+    script = '<script src="/_Incapsula_Resource?test"></script>'
+    assert len(tm.parse_listing(LISTING_HTML + script)) == 2
+    assert tm.parse_detail(DETAIL_HTML + script, "https://example.test/")["reference"] == "GM 24 NDICI AG 01 26"
+
+
+def test_browser_http_transport_streams_limits_and_closes_response(monkeypatch):
+    class Response:
+        headers = {"Content-Type": "application/zip"}
+        url = "https://example.test/final.zip"
+        closed = False
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, chunk_size):
+            yield b"abc"
+            yield b"def"
+
+        def close(self):
+            self.closed = True
+
+    response = Response()
+
+    class Session:
+        def __init__(self, **kwargs):
+            assert kwargs == {"impersonate": "chrome"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def request(self, method, url, **kwargs):
+            assert kwargs["stream"] is True
+            return response
+
+    monkeypatch.setattr(tm.requests, "Session", Session)
+    assert tm._request("https://example.test/source.zip") == (
+        b"abcdef", {"content-type": "application/zip"}, response.url,
+    )
+    assert response.closed
+    response.closed = False
+    monkeypatch.setattr(tm, "MAX_DOWNLOAD_BYTES", 5)
+    with pytest.raises(tm.TwinningError, match="limit"):
+        tm._request("https://example.test/source.zip")
+    assert response.closed
+
+
+@pytest.mark.parametrize("html", [
+    '<html><script src="/_Incapsula_Resource?test"></script></html>',
+    '<html><body>Service unavailable</body></html>',
+])
+def test_unreadable_listing_is_an_error_instead_of_no_offers(html, monkeypatch):
+    monkeypatch.setattr(tm, "fetch_text", lambda url: html)
+    with pytest.raises(tm.TwinningError):
+        tm.list_active_offers()
+
+
+def test_blocked_fiche_does_not_become_a_new_offer(monkeypatch):
+    monkeypatch.setattr(tm, "fetch_text", lambda url: LISTING_HTML if url == tm.LIST_URL else '<script src="/_Incapsula_Resource"></script>')
+    result = tm.list_active_offers(today=date(2026, 8, 10))
+    assert result["activeOffers"] == []
+    assert len(result["errors"]) == 2
 
 
 def test_ascii_url_encodes_unicode_slug_without_double_encoding():

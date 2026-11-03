@@ -87,7 +87,7 @@ const html = `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta n
 
   <div style="text-align:center;margin:22px 0 8px"><a href="${escapeHtml(payload.url)}" style="display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;border-radius:10px;padding:12px 20px;font-size:14px;font-weight:700">Otwórz ogłoszenie MSZ</a>${payload.attachmentUrl ? ` <a href="${escapeHtml(payload.attachmentUrl)}" style="display:inline-block;background:#fff;color:#1d4ed8;text-decoration:none;border:1px solid #93c5fd;border-radius:10px;padding:11px 20px;font-size:14px;font-weight:700;margin-left:6px">Pobierz załączniki</a>` : ''}</div>
 
-  <div style="font-size:11px;line-height:1.6;color:#94a3b8;text-align:center;margin:18px 0">Automatyczny monitoring strony MSZ · sprawdzanie co 30 minut<br>Analiza dokumentu: ${escapeHtml(payload.primaryDocument || sourceFiles || 'oficjalna fiszka')} · zweryfikuj dane przed aplikowaniem.</div>
+  <div style="font-size:11px;line-height:1.6;color:#94a3b8;text-align:center;margin:18px 0">Automatyczny monitoring strony MSZ · sprawdzanie o 08:00 i 15:00 (Europe/Warsaw)<br>Analiza dokumentu: ${escapeHtml(payload.primaryDocument || sourceFiles || 'oficjalna fiszka')} · zweryfikuj dane przed aplikowaniem.</div>
 </div></body></html>`;
 
 const plainLists = [

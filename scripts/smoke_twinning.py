@@ -5,6 +5,8 @@ from twinning_monitor import extract_offer, list_active_offers
 
 def main():
     listing = list_active_offers(lookback_days=180, max_offers=30)
+    if listing.get("errors"):
+        raise SystemExit(f"Smoke failed: listing errors: {listing['errors']}")
     offers = listing.get("activeOffers", [])
     if not offers:
         raise SystemExit("Smoke failed: no active Twinning offers found")

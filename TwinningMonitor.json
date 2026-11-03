@@ -16,7 +16,7 @@
     },
     {
       "id": "tw2",
-      "name": "Check every 30 minutes",
+      "name": "Check at 08:00 and 15:00",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -27,8 +27,8 @@
         "rule": {
           "interval": [
             {
-              "field": "minutes",
-              "minutesInterval": 30
+              "field": "cronExpression",
+              "expression": "0 8,15 * * *"
             }
           ]
         }
@@ -199,6 +199,20 @@
       }
     },
     {
+      "id": "tw10-context",
+      "name": "Prepare compact AI context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2320,
+        360
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const MAX_CONTEXT_CHARS = 9000;\nconst LISTING_LIMIT = 1600;\n\nconst clean = (value) => String(value || \"\")\n  .replace(/\\r/g, \"\")\n  .replace(/[\\t ]+/g, \" \")\n  .replace(/\\n{3,}/g, \"\\n\\n\")\n  .trim();\n\nconst clip = (value, limit) => {\n  const text = clean(value);\n  if (text.length <= limit) return text;\n  const boundary = Math.max(text.lastIndexOf(\" \", limit - 80), Math.floor(limit * 0.75));\n  return text.slice(0, boundary > 0 ? boundary : limit).trimEnd() + \" [truncated]\";\n};\n\nconst splitLong = (value, size = 1100) => {\n  const text = clean(value);\n  const parts = [];\n  for (let start = 0; start < text.length;) {\n    let end = Math.min(start + size, text.length);\n    if (end < text.length) {\n      const space = text.lastIndexOf(\" \", end);\n      if (space > start + Math.floor(size * 0.55)) end = space;\n    }\n    parts.push(text.slice(start, end).trim());\n    start = end;\n    while (text[start] === \" \") start += 1;\n  }\n  return parts.filter(Boolean);\n};\n\nconst relevantChunks = (value, budget) => {\n  const normalized = clean(value);\n  if (!normalized) return \"\";\n  const paragraphs = normalized.split(/\\n{2,}/).flatMap((part) => splitLong(part));\n  const chunks = (paragraphs.length ? paragraphs : splitLong(normalized)).map((text, index) => ({ text, index }));\n  const keywords = /resident twinning adviser|\\brta\\b|project leader|component leader|short[- ]term|\\bste\\b|expert|profile|qualification|experience|years? of|degree|education|language|english|cv|mandatory|required|minimum|eligib|selection|twinning fiche|work plan|result|activity|budget|duration|mission|beneficiary|digital|cyber|information system|data|e-?government|education|university|research|science|public administration|administrative|legal|legislation|regulation|anti-?corruption|process|project management/gi;\n  for (const chunk of chunks) {\n    const matches = chunk.text.match(keywords) || [];\n    chunk.score = matches.length * 8 + (chunk.index < 3 ? 3 : 0) + (chunk.text.length > 220 ? 1 : 0);\n  }\n  const selected = [];\n  let used = 0;\n  for (const chunk of [...chunks].sort((a, b) => b.score - a.score || a.index - b.index)) {\n    if (!chunk.score && selected.length >= 2) continue;\n    const extra = chunk.text.length + (selected.length ? 2 : 0);\n    if (used + extra > budget) continue;\n    selected.push(chunk);\n    used += extra;\n  }\n  if (!selected.length) return clip(normalized, budget);\n  return selected.sort((a, b) => a.index - b.index).map((chunk) => chunk.text).join(\"\\n\\n\");\n};\n\nreturn $input.all().map((item) => {\n  const source = item.json;\n  const header = [\n    \"SOURCE: official MSZ announcement and Twinning fiche.\",\n    source.title ? \"TITLE: \" + source.title : \"\",\n    source.country ? \"COUNTRY: \" + source.country : \"\",\n    source.area ? \"AREA: \" + source.area : \"\",\n    source.reference ? \"FICHE REFERENCE: \" + source.reference : \"\",\n    source.mszDeadline ? \"MSZ DEADLINE: \" + source.mszDeadline : \"\",\n    source.beneficiaryDeadline ? \"BENEFICIARY DEADLINE: \" + source.beneficiaryDeadline : \"\",\n  ].filter(Boolean).join(\"\\n\");\n  const listing = clip(source.pageText, LISTING_LIMIT);\n  const availableForFiche = Math.max(2800, MAX_CONTEXT_CHARS - header.length - listing.length - 100);\n  const fiche = relevantChunks(source.analysisText, availableForFiche);\n  const analysisContext = [header, listing ? \"MSZ ANNOUNCEMENT:\\n\" + listing : \"\", fiche ? \"RELEVANT FICHE EXCERPTS:\\n\" + fiche : \"\"]\n    .filter(Boolean)\n    .join(\"\\n\\n\")\n    .slice(0, MAX_CONTEXT_CHARS);\n\n  return {\n    json: {\n      ...source,\n      analysisContext,\n      analysisContextStats: {\n        sourceChars: clean(source.pageText).length + clean(source.analysisText).length,\n        contextChars: analysisContext.length,\n        maxContextChars: MAX_CONTEXT_CHARS,\n      },\n    },\n  };\n});\n"
+      }
+    },
+    {
       "id": "tw11",
       "name": "Analyse fit and requirements",
       "type": "@n8n/n8n-nodes-langchain.informationExtractor",
@@ -208,7 +222,7 @@
         440
       ],
       "parameters": {
-        "text": "={{ ['DANE OGŁOSZENIA MSZ:', $json.pageText || '', 'TEKST FISZKI:', $json.analysisText || ''].join('\\n\\n') }}",
+        "text": "={{ $json.analysisContext }}",
         "schemaType": "manual",
         "inputSchema": "{\"type\": \"object\", \"properties\": {\"projectTitle\": {\"type\": \"string\"}, \"purpose\": {\"type\": \"string\", \"description\": \"Cel projektu po polsku w 2-4 konkretnych zdaniach.\"}, \"soughtProfiles\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"description\": \"Role i profile ekspertów: PL, RTA, liderzy komponentów, eksperci ad hoc.\"}, \"mandatoryRequirements\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"description\": \"Konkretne wymagania: wykształcenie, lata doświadczenia, sektor, język, obywatelstwo/status.\"}, \"keyTasks\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"locationAndTravel\": {\"type\": \"string\"}, \"duration\": {\"type\": \"string\"}, \"budget\": {\"type\": \"string\"}, \"language\": {\"type\": \"string\"}, \"whoCanApply\": {\"type\": \"string\", \"description\": \"Wyjaśnij, że ofertę składa administracja publiczna lub Mandated Body, a ekspert indywidualny działa przez uprawnioną instytucję.\"}, \"decisionSummary\": {\"type\": \"string\", \"description\": \"Krótka ocena komu warto aplikować i co jest główną barierą.\"}, \"risksOrCaveats\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"sourceQuality\": {\"type\": \"string\", \"description\": \"high, medium albo low\"}, \"fitBand\": {\"type\": \"string\", \"enum\": [\"strong\", \"borderline\", \"no_fit\"], \"description\": \"Dopasowanie do profilu użytkownika. Przy niepewności zawsze borderline, nigdy no_fit.\"}, \"fitScore\": {\"type\": \"integer\", \"minimum\": 0, \"maximum\": 100}, \"fitReason\": {\"type\": \"string\", \"description\": \"Konkretne uzasadnienie dopasowania lub niedopasowania do profilu.\"}, \"bestEntryRole\": {\"type\": \"string\", \"description\": \"Najbardziej realna rola wejściowa, preferuj STE/ekspert ad hoc.\"}, \"internationalExperienceRequirement\": {\"type\": \"string\", \"description\": \"Czy wcześniejsze doświadczenie międzynarodowe/Twinning jest wymagane, preferowane czy niewskazane.\"}}, \"required\": [\"purpose\", \"soughtProfiles\", \"mandatoryRequirements\", \"whoCanApply\", \"decisionSummary\", \"fitBand\", \"fitScore\", \"fitReason\", \"bestEntryRole\", \"internationalExperienceRequirement\"]}",
         "options": {
@@ -217,7 +231,7 @@
       },
       "retryOnFail": true,
       "maxTries": 5,
-      "waitBetweenTries": 65000
+      "waitBetweenTries": 5000
     },
     {
       "id": "tw12",
@@ -229,15 +243,15 @@
         660
       ],
       "parameters": {
-        "model": "llama-3.3-70b-versatile",
+        "model": "openai/gpt-oss-120b",
         "options": {
           "temperature": 0.1,
-          "maxTokensToSample": 1800
+          "maxTokensToSample": 3500
         }
       },
       "credentials": {
         "groqApi": {
-          "id": "j4jwLe5JW6aKUJ0O",
+          "id": "2S2vBMZiDiMvOYox",
           "name": "Groq account"
         }
       }
@@ -299,7 +313,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "function clean(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction escapeHtml(value) {\n  return String(value || '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\nfunction list(value, limit = 8) {\n  if (!Array.isArray(value)) return [];\n  return value.map(clean).filter(Boolean).slice(0, limit);\n}\n\nfunction renderList(title, values, accent = '#1d4ed8') {\n  const items = list(values);\n  if (!items.length) return '';\n  return `<div style=\"margin:18px 0 0\"><div style=\"font-size:12px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:${accent};margin-bottom:8px\">${escapeHtml(title)}</div><ul style=\"margin:0;padding-left:20px;color:#334155;font-size:14px;line-height:1.7\">${items.map(item => `<li style=\"margin:0 0 6px\">${escapeHtml(item)}</li>`).join('')}</ul></div>`;\n}\n\nfunction renderFact(label, value) {\n  const normalized = clean(value);\n  if (!normalized) return '';\n  return `<tr><td style=\"padding:8px 12px 8px 0;color:#64748b;font-size:12px;font-weight:700;text-transform:uppercase;vertical-align:top;white-space:nowrap\">${escapeHtml(label)}</td><td style=\"padding:8px 0;color:#0f172a;font-size:14px;line-height:1.55\">${escapeHtml(normalized)}</td></tr>`;\n}\n\nconst payload = $json || {};\nconst ai = payload.output && typeof payload.output === 'object' ? payload.output : {};\nconst isUpdate = payload.notificationType === 'updated';\nconst fitLabel = ai.fitBand === 'strong' ? 'Dobre dopasowanie' : 'Możliwe dopasowanie — oceń samodzielnie';\nconst statusLabel = isUpdate ? 'Aktualizacja fiszki' : 'Nowa fiszka Twinning';\nconst statusColor = isUpdate ? '#b45309' : '#047857';\nconst statusBackground = isUpdate ? '#fff7ed' : '#ecfdf5';\nconst title = clean(payload.title || ai.projectTitle || 'Nowa oferta Twinning');\nconst country = clean(payload.country || payload.beneficiary || ai.locationAndTravel);\nconst purpose = clean(ai.purpose || ai.decisionSummary || payload.pageText);\nconst decision = clean(ai.decisionSummary || purpose);\nconst sourceFiles = Array.isArray(payload.sourceFiles)\n  ? payload.sourceFiles.map(file => file.name).filter(Boolean).join(', ')\n  : clean(payload.primaryDocument);\n\nconst facts = [\n  renderFact('Kraj / beneficjent', country),\n  renderFact('Obszar', payload.area),\n  renderFact('Numer', payload.reference || payload.offerId),\n  renderFact('Termin do MSZ', payload.mszDeadline),\n  renderFact('Termin beneficjenta', payload.beneficiaryDeadline),\n  renderFact('Budżet', ai.budget),\n  renderFact('Czas projektu', ai.duration),\n  renderFact('Miejsce i wyjazdy', ai.locationAndTravel),\n  renderFact('Język', ai.language),\n  renderFact('Dopasowanie do profilu', `${fitLabel}${ai.fitScore !== undefined ? ` (${ai.fitScore}/100)` : ''}`),\n  renderFact('Najlepsza rola wejściowa', ai.bestEntryRole),\n  renderFact('Doświadczenie międzynarodowe', ai.internationalExperienceRequirement),\n].join('');\n\nconst html = `<!doctype html><html lang=\"pl\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body style=\"margin:0;padding:20px;background:#eef2f7;font-family:Arial,Helvetica,sans-serif;color:#0f172a\"><div style=\"max-width:720px;margin:0 auto\">\n  <div style=\"background:linear-gradient(135deg,#0f2f55,#1d4ed8);color:#fff;border-radius:18px;padding:30px 28px;box-shadow:0 16px 40px rgba(30,64,175,.2)\">\n    <div style=\"display:inline-block;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 12px;font-size:11px;font-weight:800;letter-spacing:.8px;text-transform:uppercase\">${escapeHtml(statusLabel)}</div>\n    <h1 style=\"font-size:24px;line-height:1.35;margin:16px 0 8px\">${escapeHtml(title)}</h1>\n    <div style=\"font-size:14px;line-height:1.7;opacity:.9\">${escapeHtml(country)}${payload.area ? ` · ${escapeHtml(payload.area)}` : ''}</div>\n  </div>\n\n  <div style=\"background:${statusBackground};border:1px solid ${isUpdate ? '#fed7aa' : '#a7f3d0'};border-radius:14px;padding:18px 20px;margin-top:18px\">\n    <div style=\"font-size:11px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:${statusColor};margin-bottom:7px\">Ocena do szybkiej decyzji</div>\n    <div style=\"font-size:15px;line-height:1.7;color:#1f2937\"><strong>${escapeHtml(fitLabel)}.</strong> ${escapeHtml(clean(ai.fitReason))}${ai.fitReason ? '<br><br>' : ''}${escapeHtml(decision || 'Szczegóły zostały odczytane z oficjalnej fiszki. Otwórz dokument źródłowy, aby zweryfikować dopasowanie do Twojego doświadczenia.')}</div>\n  </div>\n\n  <div style=\"background:#fff;border:1px solid #dbe3ee;border-radius:14px;padding:22px;margin-top:18px\">\n    <h2 style=\"font-size:18px;margin:0 0 10px;color:#0f172a\">Najważniejsze informacje</h2>\n    <p style=\"font-size:14px;line-height:1.75;color:#334155;margin:0 0 12px\">${escapeHtml(purpose)}</p>\n    <table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin-top:8px\">${facts}</table>\n    ${renderList('Kogo szukają', ai.soughtProfiles, '#7c3aed')}\n    ${renderList('Wymagania obowiązkowe', ai.mandatoryRequirements, '#b45309')}\n    ${renderList('Główne zadania', ai.keyTasks, '#1d4ed8')}\n    ${renderList('Na co uważać', ai.risksOrCaveats, '#be123c')}\n  </div>\n\n  <div style=\"background:#fff7ed;border:1px solid #fdba74;border-radius:14px;padding:18px 20px;margin-top:18px\">\n    <div style=\"font-size:12px;font-weight:800;color:#9a3412;text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px\">Ważne: jak można dołączyć</div>\n    <div style=\"font-size:14px;line-height:1.7;color:#431407\">${escapeHtml(clean(ai.whoCanApply) || 'Ofertę składa polska jednostka administracji publicznej albo instytucja ze statusem Mandated Body. Indywidualny ekspert uczestniczy przez taką instytucję — jako RTA, lider komponentu lub ekspert ad hoc — a nie jako samodzielny oferent.')}</div>\n  </div>\n\n  <div style=\"text-align:center;margin:22px 0 8px\"><a href=\"${escapeHtml(payload.url)}\" style=\"display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;border-radius:10px;padding:12px 20px;font-size:14px;font-weight:700\">Otwórz ogłoszenie MSZ</a>${payload.attachmentUrl ? ` <a href=\"${escapeHtml(payload.attachmentUrl)}\" style=\"display:inline-block;background:#fff;color:#1d4ed8;text-decoration:none;border:1px solid #93c5fd;border-radius:10px;padding:11px 20px;font-size:14px;font-weight:700;margin-left:6px\">Pobierz załączniki</a>` : ''}</div>\n\n  <div style=\"font-size:11px;line-height:1.6;color:#94a3b8;text-align:center;margin:18px 0\">Automatyczny monitoring strony MSZ · sprawdzanie co 30 minut<br>Analiza dokumentu: ${escapeHtml(payload.primaryDocument || sourceFiles || 'oficjalna fiszka')} · zweryfikuj dane przed aplikowaniem.</div>\n</div></body></html>`;\n\nconst plainLists = [\n  ['Kogo szukają', list(ai.soughtProfiles)],\n  ['Wymagania obowiązkowe', list(ai.mandatoryRequirements)],\n  ['Główne zadania', list(ai.keyTasks)],\n  ['Na co uważać', list(ai.risksOrCaveats)],\n].map(([heading, values]) => values.length ? `${heading}:\\n- ${values.join('\\n- ')}` : '').filter(Boolean).join('\\n\\n');\n\nconst subjectPrefix = isUpdate ? 'AKTUALIZACJA FISZKI' : 'NOWA FISZKA TWINNING';\nreturn [{ json: {\n  ...payload,\n  subject: `${subjectPrefix}: ${country || payload.area || 'MSZ'} — ${title}`.slice(0, 220),\n  html,\n  text: [\n    statusLabel,\n    title,\n    country,\n    `Termin do MSZ: ${clean(payload.mszDeadline) || 'sprawdź w ogłoszeniu'}`,\n    '',\n    decision,\n    '',\n    purpose,\n    '',\n    plainLists,\n    '',\n    `Kto może aplikować: ${clean(ai.whoCanApply) || 'polska administracja publiczna / Mandated Body; ekspert indywidualny przez uprawnioną instytucję'}`,\n    '',\n    `Ogłoszenie: ${payload.url}`,\n    payload.attachmentUrl ? `Załączniki: ${payload.attachmentUrl}` : '',\n  ].filter(value => value !== '').join('\\n'),\n} }];\n"
+        "jsCode": "function clean(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction escapeHtml(value) {\n  return String(value || '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\nfunction list(value, limit = 8) {\n  if (!Array.isArray(value)) return [];\n  return value.map(clean).filter(Boolean).slice(0, limit);\n}\n\nfunction renderList(title, values, accent = '#1d4ed8') {\n  const items = list(values);\n  if (!items.length) return '';\n  return `<div style=\"margin:18px 0 0\"><div style=\"font-size:12px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:${accent};margin-bottom:8px\">${escapeHtml(title)}</div><ul style=\"margin:0;padding-left:20px;color:#334155;font-size:14px;line-height:1.7\">${items.map(item => `<li style=\"margin:0 0 6px\">${escapeHtml(item)}</li>`).join('')}</ul></div>`;\n}\n\nfunction renderFact(label, value) {\n  const normalized = clean(value);\n  if (!normalized) return '';\n  return `<tr><td style=\"padding:8px 12px 8px 0;color:#64748b;font-size:12px;font-weight:700;text-transform:uppercase;vertical-align:top;white-space:nowrap\">${escapeHtml(label)}</td><td style=\"padding:8px 0;color:#0f172a;font-size:14px;line-height:1.55\">${escapeHtml(normalized)}</td></tr>`;\n}\n\nconst payload = $json || {};\nconst ai = payload.output && typeof payload.output === 'object' ? payload.output : {};\nconst isUpdate = payload.notificationType === 'updated';\nconst fitLabel = ai.fitBand === 'strong' ? 'Dobre dopasowanie' : 'Możliwe dopasowanie — oceń samodzielnie';\nconst statusLabel = isUpdate ? 'Aktualizacja fiszki' : 'Nowa fiszka Twinning';\nconst statusColor = isUpdate ? '#b45309' : '#047857';\nconst statusBackground = isUpdate ? '#fff7ed' : '#ecfdf5';\nconst title = clean(payload.title || ai.projectTitle || 'Nowa oferta Twinning');\nconst country = clean(payload.country || payload.beneficiary || ai.locationAndTravel);\nconst purpose = clean(ai.purpose || ai.decisionSummary || payload.pageText);\nconst decision = clean(ai.decisionSummary || purpose);\nconst sourceFiles = Array.isArray(payload.sourceFiles)\n  ? payload.sourceFiles.map(file => file.name).filter(Boolean).join(', ')\n  : clean(payload.primaryDocument);\n\nconst facts = [\n  renderFact('Kraj / beneficjent', country),\n  renderFact('Obszar', payload.area),\n  renderFact('Numer', payload.reference || payload.offerId),\n  renderFact('Termin do MSZ', payload.mszDeadline),\n  renderFact('Termin beneficjenta', payload.beneficiaryDeadline),\n  renderFact('Budżet', ai.budget),\n  renderFact('Czas projektu', ai.duration),\n  renderFact('Miejsce i wyjazdy', ai.locationAndTravel),\n  renderFact('Język', ai.language),\n  renderFact('Dopasowanie do profilu', `${fitLabel}${ai.fitScore !== undefined ? ` (${ai.fitScore}/100)` : ''}`),\n  renderFact('Najlepsza rola wejściowa', ai.bestEntryRole),\n  renderFact('Doświadczenie międzynarodowe', ai.internationalExperienceRequirement),\n].join('');\n\nconst html = `<!doctype html><html lang=\"pl\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body style=\"margin:0;padding:20px;background:#eef2f7;font-family:Arial,Helvetica,sans-serif;color:#0f172a\"><div style=\"max-width:720px;margin:0 auto\">\n  <div style=\"background:linear-gradient(135deg,#0f2f55,#1d4ed8);color:#fff;border-radius:18px;padding:30px 28px;box-shadow:0 16px 40px rgba(30,64,175,.2)\">\n    <div style=\"display:inline-block;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 12px;font-size:11px;font-weight:800;letter-spacing:.8px;text-transform:uppercase\">${escapeHtml(statusLabel)}</div>\n    <h1 style=\"font-size:24px;line-height:1.35;margin:16px 0 8px\">${escapeHtml(title)}</h1>\n    <div style=\"font-size:14px;line-height:1.7;opacity:.9\">${escapeHtml(country)}${payload.area ? ` · ${escapeHtml(payload.area)}` : ''}</div>\n  </div>\n\n  <div style=\"background:${statusBackground};border:1px solid ${isUpdate ? '#fed7aa' : '#a7f3d0'};border-radius:14px;padding:18px 20px;margin-top:18px\">\n    <div style=\"font-size:11px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:${statusColor};margin-bottom:7px\">Ocena do szybkiej decyzji</div>\n    <div style=\"font-size:15px;line-height:1.7;color:#1f2937\"><strong>${escapeHtml(fitLabel)}.</strong> ${escapeHtml(clean(ai.fitReason))}${ai.fitReason ? '<br><br>' : ''}${escapeHtml(decision || 'Szczegóły zostały odczytane z oficjalnej fiszki. Otwórz dokument źródłowy, aby zweryfikować dopasowanie do Twojego doświadczenia.')}</div>\n  </div>\n\n  <div style=\"background:#fff;border:1px solid #dbe3ee;border-radius:14px;padding:22px;margin-top:18px\">\n    <h2 style=\"font-size:18px;margin:0 0 10px;color:#0f172a\">Najważniejsze informacje</h2>\n    <p style=\"font-size:14px;line-height:1.75;color:#334155;margin:0 0 12px\">${escapeHtml(purpose)}</p>\n    <table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin-top:8px\">${facts}</table>\n    ${renderList('Kogo szukają', ai.soughtProfiles, '#7c3aed')}\n    ${renderList('Wymagania obowiązkowe', ai.mandatoryRequirements, '#b45309')}\n    ${renderList('Główne zadania', ai.keyTasks, '#1d4ed8')}\n    ${renderList('Na co uważać', ai.risksOrCaveats, '#be123c')}\n  </div>\n\n  <div style=\"background:#fff7ed;border:1px solid #fdba74;border-radius:14px;padding:18px 20px;margin-top:18px\">\n    <div style=\"font-size:12px;font-weight:800;color:#9a3412;text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px\">Ważne: jak można dołączyć</div>\n    <div style=\"font-size:14px;line-height:1.7;color:#431407\">${escapeHtml(clean(ai.whoCanApply) || 'Ofertę składa polska jednostka administracji publicznej albo instytucja ze statusem Mandated Body. Indywidualny ekspert uczestniczy przez taką instytucję — jako RTA, lider komponentu lub ekspert ad hoc — a nie jako samodzielny oferent.')}</div>\n  </div>\n\n  <div style=\"text-align:center;margin:22px 0 8px\"><a href=\"${escapeHtml(payload.url)}\" style=\"display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;border-radius:10px;padding:12px 20px;font-size:14px;font-weight:700\">Otwórz ogłoszenie MSZ</a>${payload.attachmentUrl ? ` <a href=\"${escapeHtml(payload.attachmentUrl)}\" style=\"display:inline-block;background:#fff;color:#1d4ed8;text-decoration:none;border:1px solid #93c5fd;border-radius:10px;padding:11px 20px;font-size:14px;font-weight:700;margin-left:6px\">Pobierz załączniki</a>` : ''}</div>\n\n  <div style=\"font-size:11px;line-height:1.6;color:#94a3b8;text-align:center;margin:18px 0\">Automatyczny monitoring strony MSZ · sprawdzanie o 08:00 i 15:00 (Europe/Warsaw)<br>Analiza dokumentu: ${escapeHtml(payload.primaryDocument || sourceFiles || 'oficjalna fiszka')} · zweryfikuj dane przed aplikowaniem.</div>\n</div></body></html>`;\n\nconst plainLists = [\n  ['Kogo szukają', list(ai.soughtProfiles)],\n  ['Wymagania obowiązkowe', list(ai.mandatoryRequirements)],\n  ['Główne zadania', list(ai.keyTasks)],\n  ['Na co uważać', list(ai.risksOrCaveats)],\n].map(([heading, values]) => values.length ? `${heading}:\\n- ${values.join('\\n- ')}` : '').filter(Boolean).join('\\n\\n');\n\nconst subjectPrefix = isUpdate ? 'AKTUALIZACJA FISZKI' : 'NOWA FISZKA TWINNING';\nreturn [{ json: {\n  ...payload,\n  subject: `${subjectPrefix}: ${country || payload.area || 'MSZ'} — ${title}`.slice(0, 220),\n  html,\n  text: [\n    statusLabel,\n    title,\n    country,\n    `Termin do MSZ: ${clean(payload.mszDeadline) || 'sprawdź w ogłoszeniu'}`,\n    '',\n    decision,\n    '',\n    purpose,\n    '',\n    plainLists,\n    '',\n    `Kto może aplikować: ${clean(ai.whoCanApply) || 'polska administracja publiczna / Mandated Body; ekspert indywidualny przez uprawnioną instytucję'}`,\n    '',\n    `Ogłoszenie: ${payload.url}`,\n    payload.attachmentUrl ? `Załączniki: ${payload.attachmentUrl}` : '',\n  ].filter(value => value !== '').join('\\n'),\n} }];\n"
       }
     },
     {
@@ -338,8 +352,8 @@
       },
       "credentials": {
         "httpHeaderAuth": {
-          "id": "8pIewAUkFsshffYZ",
-          "name": "Header Auth account"
+          "id": "MNiSWResend20261026",
+          "name": "MNiSW · Resend"
         }
       },
       "retryOnFail": true,
@@ -563,8 +577,8 @@
       },
       "credentials": {
         "httpHeaderAuth": {
-          "id": "8pIewAUkFsshffYZ",
-          "name": "Header Auth account"
+          "id": "MNiSWResend20261026",
+          "name": "MNiSW · Resend"
         }
       },
       "retryOnFail": true,
@@ -633,7 +647,7 @@
         ]
       ]
     },
-    "Check every 30 minutes": {
+    "Check at 08:00 and 15:00": {
       "main": [
         [
           {
@@ -736,12 +750,23 @@
       "main": [
         [
           {
-            "node": "Analyse fit and requirements",
+            "node": "Prepare compact AI context",
             "type": "main",
             "index": 0
           },
           {
             "node": "Merge fiche and analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare compact AI context": {
+      "main": [
+        [
+          {
+            "node": "Analyse fit and requirements",
             "type": "main",
             "index": 0
           }
@@ -963,7 +988,7 @@
     "timezone": "Europe/Warsaw",
     "saveManualExecutions": true,
     "saveExecutionProgress": true,
-    "saveDataSuccessExecution": "none",
+    "saveDataSuccessExecution": "all",
     "saveDataErrorExecution": "all"
   },
   "versionId": "twinning-monitor-resend-v1",
