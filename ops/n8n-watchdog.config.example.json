@@ -1,0 +1,19 @@
+{
+  "container_id": 105,
+  "probe_path": "/opt/n8n-app/scripts/n8n_watchdog_probe.py",
+  "editor_url": "https://n8n.familyos.pl",
+  "from_email": "n8n-monitor@send.familyos.pl",
+  "to_emails": ["michalreczek@gmail.com"],
+  "schedule_grace_minutes": 120,
+  "max_runtime_hours": 2,
+  "required_workflows": {
+    "TWNMONITOR2026": "MSZ Twinning → analiza ofert → Resend"
+  },
+  "required_schedules": {
+    "TWNMONITOR2026": {
+      "tw2": "Check at 08:00 and 15:00",
+      "tw21": "Digest every two days"
+    }
+  },
+  "ignored_workflows": []
+}

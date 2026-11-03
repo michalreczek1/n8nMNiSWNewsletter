@@ -1,0 +1,11 @@
+[Unit]
+Description=Inspect n8n every 47 hours (no separate event collector)
+
+[Timer]
+OnBootSec=10min
+OnUnitInactiveSec=47h
+AccuracySec=1min
+Unit=n8n-watchdog.service
+
+[Install]
+WantedBy=timers.target

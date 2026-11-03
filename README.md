@@ -273,6 +273,17 @@ The Playwright smoke script resolves Playwright from the project used as its
 working directory and checks desktop and mobile rendering without horizontal
 overflow.
 
+## n8n anomaly-only monitoring
+
+The Proxmox host inspects n8n every **47 hours**, without a separate event
+collector. Email goes only to `michalreczek@gmail.com` when a workflow/service
+problem or a new stable n8n version is detected. Healthy checks remain silent;
+the same update version is announced once. The monitor runs outside LXC 105
+and does not execute workflows or install n8n upgrades.
+
+Deployment, coverage, policy and commands are documented in
+[`ops/n8n-watchdog.md`](ops/n8n-watchdog.md).
+
 ## Next Milestone Steps
 
 Phase 4 prepares the repository and deployment bootstrap.
